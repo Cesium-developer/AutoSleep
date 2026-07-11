@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write   # 允许上传 Release 文件
 
     steps:
       - name: 拉取代码
@@ -26,6 +28,6 @@ jobs:
         run: makensis Setup.nsi
 
       - name: 上传到 Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: AutoSleep_Setup.exe
