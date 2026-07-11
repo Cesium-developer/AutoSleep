@@ -16,6 +16,9 @@ jobs:
       - name: 安装 NSIS
         run: choco install nsis --version 3.09 -y
 
+      - name: 将 NSIS 添加到 PATH
+        run: echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
+
       - name: 编译卸载程序
         run: makensis Uninstall.nsi
 
