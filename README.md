@@ -1,5 +1,9 @@
 # AutoSleep
 
+![Build Status](https://github.com/Cesium-developer/AutoSleep/actions/workflows/build.yml/badge.svg)
+
+![设置界面](images/settings.png)
+
 > 🤖 **AI 生成声明**：本项目代码由 AI（DeepSeek）辅助生成，最终由作者完成测试、调试和打包。所有源码以明文形式提供，欢迎审计。
 
 Windows 智能电源管理守护工具：多条件感知，任务完成后自动睡眠/休眠。
