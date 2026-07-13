@@ -27,7 +27,22 @@ jobs:
       - name: 编译安装程序
         run: makensis Setup.nsi
 
-      - name: 上传到 Release
+      - name: 生成 SHA256 校验文件
+        shell: pwsh
+        run: |
+          $exe = ".\AutoSleep_Setup.exe"
+          if (-Not (Test-Path $exe)) {
+            Write-Error "Installer not found: $exe"
+            exit 1
+          }
+          $hash = Get-FileHash -Algorithm SHA256 $exe
+          # 仅保存哈希文本，便于用户复制验证或下载校验文件
+          $hash.Hash | Out-File -Encoding ASCII -FilePath ".\AutoSleep_Setup.exe.sha256"
+          Write-Host "SHA256: $($hash.Hash)"
+
+      - name: 上传到 Release（包含校验）
         uses: softprops/action-gh-release@v3
         with:
-          files: AutoSleep_Setup.exe
+          files: |
+            AutoSleep_Setup.exe
+            AutoSleep_Setup.exe.sha256
