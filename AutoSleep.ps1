@@ -276,7 +276,18 @@ while ($true) {
     }
 
     # ---- CPU / GPU ----
-    $cpu = (Get-Counter '\Processor(_Total)\% Processor Time').CounterSamples.CookedValue
+    try {
+        $cpuSample = Get-Counter '\Processor(_Total)\% Processor Time' -ErrorAction Stop
+        $raw = $cpuSample.CounterSamples.CookedValue
+        if ($raw -is [array]) {
+            $cpu = [double]$raw[0]    # 取第一个样本（与原行为最接近）
+        } else {
+            $cpu = [double]$raw
+        }
+    } catch {
+        Write-Host "$(Get-Date -Format HH:mm:ss) 警告：读取 CPU 计数器失败：$_" -ForegroundColor Yellow
+        $cpu = 100.0
+    }
 
     if ($enableGpu) {
         try {
