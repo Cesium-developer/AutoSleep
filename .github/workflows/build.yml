@@ -13,7 +13,7 @@ jobs:
 
     steps:
       - name: 拉取代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 安装 NSIS
         run: choco install nsis --version 3.09 -y
@@ -28,6 +28,6 @@ jobs:
         run: makensis Setup.nsi
 
       - name: 上传到 Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: AutoSleep_Setup.exe
