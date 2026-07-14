@@ -269,7 +269,7 @@ if (Test-Path $regPath) {
 }
 New-Item -Path $regPath -Force | Out-Null
 Set-ItemProperty -Path $regPath -Name "DisplayName" -Value "AutoSleep 智能休眠工具"
-Set-ItemProperty -Path $regPath -Name "DisplayVersion" -Value "1.0.1"
+Set-ItemProperty -Path $regPath -Name "DisplayVersion" -Value "1.0.2"
 Set-ItemProperty -Path $regPath -Name "Publisher" -Value "Cesium-developer"
 Set-ItemProperty -Path $regPath -Name "InstallLocation" -Value $targetDir
 Set-ItemProperty -Path $regPath -Name "UninstallString" -Value "$targetDir\Uninstall.exe"

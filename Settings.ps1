@@ -306,7 +306,7 @@ $top += $rowHeight + 10
 # ---- 按钮 ----
 $btnSave = New-Object System.Windows.Forms.Button
 $btnSave.Text = "保存"
-$btnSave.Location = New-Point 50 $top
+$btnSave.Location = New-Point 20 $top
 $btnSave.Size = New-Object System.Drawing.Size(80, 30)
 $btnSave.Add_Click({
     function Get-Int($text) {
@@ -371,8 +371,8 @@ $btnSave.Add_Click({
 $form.Controls.Add($btnSave)
 
 $btnHelp = New-Object System.Windows.Forms.Button
-$btnHelp.Text = "📖 帮助"
-$btnHelp.Location = New-Point 140 $top
+$btnHelp.Text = "帮助"
+$btnHelp.Location = New-Point 110 $top
 $btnHelp.Size = New-Object System.Drawing.Size(80, 30)
 $btnHelp.Add_Click({
     $readmePath = "C:\ProgramData\AutoSleep\README.txt"
@@ -391,14 +391,14 @@ $form.Controls.Add($btnHelp)
 
 $btnCancel = New-Object System.Windows.Forms.Button
 $btnCancel.Text = "取消"
-$btnCancel.Location = New-Point 230 $top
+$btnCancel.Location = New-Point 200 $top
 $btnCancel.Size = New-Object System.Drawing.Size(80, 30)
 $btnCancel.Add_Click({ $form.Close() })
 $form.Controls.Add($btnCancel)
 
 $btnClearLog = New-Object System.Windows.Forms.Button
 $btnClearLog.Text = "清空日志"
-$btnClearLog.Location = New-Point 320 $top
+$btnClearLog.Location = New-Point 290 $top
 $btnClearLog.Size = New-Object System.Drawing.Size(80, 30)
 $btnClearLog.Add_Click({
     $logPath = "C:\ProgramData\AutoSleep\AutoSleep.log"
@@ -428,5 +428,37 @@ $btnClearLog.Add_Click({
     }
 })
 $form.Controls.Add($btnClearLog)
+
+$btnShowLog = New-Object System.Windows.Forms.Button
+$btnShowLog.Text = "显示日志"
+$btnShowLog.Location = New-Point 380 $top
+$btnShowLog.Size = New-Object System.Drawing.Size(80, 30)
+$btnShowLog.Add_Click({
+    $logFile = "C:\ProgramData\AutoSleep\AutoSleep.log"
+    if (Test-Path $logFile) {
+        # 构建命令字符串：设置黑底白字，清屏，设置标题，开始追踪日志
+        $cmd = @"
+`$Host.UI.RawUI.BackgroundColor = 'Black'
+`$Host.UI.RawUI.ForegroundColor = 'White'
+Clear-Host
+`$Host.UI.RawUI.WindowTitle = 'AutoSleep 日志监控'
+Get-Content 'C:\ProgramData\AutoSleep\AutoSleep.log' -Wait
+"@
+        Start-Process powershell -ArgumentList @(
+            '-NoProfile',
+            '-NoExit',
+            '-Command',
+            $cmd
+        )
+    } else {
+        [System.Windows.Forms.MessageBox]::Show(
+                "日志文件尚未生成，请先运行 AutoSleep 主程序。`n路径：$logFile",
+                "提示",
+                "OK",
+                "Information"
+        )
+    }
+})
+$form.Controls.Add($btnShowLog)
 
 $form.ShowDialog()
