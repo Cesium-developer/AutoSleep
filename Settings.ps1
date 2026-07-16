@@ -46,6 +46,8 @@ $defaultConfig = @{
     ClearLogOnNextRun    = $false
     EnableDiskCheck      = $true
     DiskThresholdKBps    = 10240
+    EnableLogRotation    = $false
+    LogRetentionDays     = 30
 }
 
 if (Test-Path $configPath) {
@@ -67,10 +69,11 @@ $config.NetworkThresholdKBps = [int]$config.NetworkThresholdKBps
 $config.TimeWindowStart      = [int]$config.TimeWindowStart
 $config.TimeWindowEnd        = [int]$config.TimeWindowEnd
 $config.DiskThresholdKBps    = [int]$config.DiskThresholdKBps
+$config.LogRetentionDays     = [int]$config.LogRetentionDays
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "AutoSleep 设置"
-$form.Size = New-Object System.Drawing.Size(480, 920)
+$form.Size = New-Object System.Drawing.Size(480, 960)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
@@ -119,28 +122,23 @@ $comboMode.Size = New-Object System.Drawing.Size($controlWidth, 25)
 $comboMode.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
 $comboMode.Items.AddRange(@("Hibernate", "Sleep"))
 
-# 根据休眠状态决定默认选中项并调整下拉选项
 $hibernateOn = Get-HibernateStatus
 if (-not $hibernateOn) {
-    # 休眠关闭时，从下拉框中移除 Hibernate 选项
     $comboMode.Items.Remove("Hibernate")
     if ($comboMode.Items.Count -eq 1 -and $comboMode.Items[0] -eq "Sleep") {
         $comboMode.SelectedIndex = 0
     }
-    # 如果配置中是 Hibernate 但系统不支持，自动切换到 Sleep
     if ($config.PowerAction -eq "Hibernate") {
         $config.PowerAction = "Sleep"
         $config | ConvertTo-Json | Set-Content -Path $configPath -Encoding UTF8
     }
     $comboMode.SelectedItem = "Sleep"
 } else {
-    # 休眠开启时，正常显示
     $comboMode.SelectedItem = $config.PowerAction
 }
 $form.Controls.Add($comboMode)
 $top += $rowHeight
 
-# 休眠状态提示（在模式选择下方显示）
 $lblHibernateStatus = New-Object System.Windows.Forms.Label
 $lblHibernateStatus.Text = if ($hibernateOn) { "✅ 休眠功能已开启" } else { "⚠️ 休眠功能未开启，仅可使用睡眠模式" }
 $lblHibernateStatus.Location = New-Point $leftControl $top
@@ -349,6 +347,34 @@ $txtTimeEnd.Text = $config.TimeWindowEnd.ToString()
 $form.Controls.Add($txtTimeEnd)
 $top += $rowHeight + 10
 
+# ---- 12. 日志轮转（新增） ----
+$chkLogRotation = New-Object System.Windows.Forms.CheckBox
+$chkLogRotation.Text = "启用日志轮转"
+$chkLogRotation.Location = New-Point $leftLabel $top
+$chkLogRotation.Size = New-Object System.Drawing.Size(160, 25)
+$chkLogRotation.Checked = [bool]$config.EnableLogRotation
+$form.Controls.Add($chkLogRotation)
+
+$lblRetentionDays = New-Object System.Windows.Forms.Label
+$lblRetentionDays.Text = "保留天数："
+$lblRetentionDays.Location = New-Point ($leftControl) $top
+$lblRetentionDays.Size = New-Object System.Drawing.Size(80, 25)
+$form.Controls.Add($lblRetentionDays)
+
+$txtRetentionDays = New-Object System.Windows.Forms.TextBox
+$txtRetentionDays.Location = New-Point ($leftControl + 80) $top
+$txtRetentionDays.Size = New-Object System.Drawing.Size(50, 25)
+$txtRetentionDays.Text = $config.LogRetentionDays.ToString()
+
+$lblRetentionUnit = New-Object System.Windows.Forms.Label
+$lblRetentionUnit.Text = "天"
+$lblRetentionUnit.Location = New-Point ($leftControl + 135) ($top + 3)
+$lblRetentionUnit.Size = New-Object System.Drawing.Size(30, 20)
+$form.Controls.Add($txtRetentionDays)
+$form.Controls.Add($lblRetentionUnit)
+
+$top += $rowHeight
+
 # ---- 按钮行1 ----
 $btnSave = New-Object System.Windows.Forms.Button
 $btnSave.Text = "保存"
@@ -367,19 +393,19 @@ $btnSave.Add_Click({
     $interval = Get-Int $txtInterval.Text
     $netThreshold = Get-Int $txtNetworkThreshold.Text
     $diskThreshold = Get-Int $txtDiskThreshold.Text
+    $retentionDays = Get-Int $txtRetentionDays.Text
     $timeStart = Get-Int $txtTimeStart.Text
     $timeEnd = Get-Int $txtTimeEnd.Text
 
-    if ($null -eq $duration -or $null -eq $cpu -or $null -eq $gpu -or $null -eq $interval -or $null -eq $netThreshold -or $null -eq $diskThreshold -or $null -eq $timeStart -or $null -eq $timeEnd) {
+    if ($null -eq $duration -or $null -eq $cpu -or $null -eq $gpu -or $null -eq $interval -or $null -eq $netThreshold -or $null -eq $diskThreshold -or $null -eq $retentionDays -or $null -eq $timeStart -or $null -eq $timeEnd) {
         [System.Windows.Forms.MessageBox]::Show("请确保所有数字字段已正确填写。", "输入错误", "OK", "Error")
         return
     }
-    if ($duration -le 0 -or $cpu -lt 0 -or $gpu -lt 0 -or $interval -lt 3 -or $netThreshold -lt 1 -or $diskThreshold -lt 1 -or $timeStart -lt 0 -or $timeStart -gt 23 -or $timeEnd -lt 0 -or $timeEnd -gt 23) {
+    if ($duration -le 0 -or $cpu -lt 0 -or $gpu -lt 0 -or $interval -lt 3 -or $netThreshold -lt 1 -or $diskThreshold -lt 1 -or $retentionDays -lt 1 -or $timeStart -lt 0 -or $timeStart -gt 23 -or $timeEnd -lt 0 -or $timeEnd -gt 23) {
         [System.Windows.Forms.MessageBox]::Show("数值超出合理范围，请检查。", "输入错误", "OK", "Error")
         return
     }
 
-    # 检查休眠状态与模式选择的匹配
     $hibernateOn = Get-HibernateStatus
     if (-not $hibernateOn -and $comboMode.SelectedItem -eq "Hibernate") {
         [System.Windows.Forms.MessageBox]::Show("休眠功能未开启，无法选择休眠模式。`n请先开启休眠功能，或选择睡眠模式。", "模式不可用", "OK", "Error")
@@ -409,6 +435,8 @@ $btnSave.Add_Click({
             EnableTimeWindow     = [bool]$chkTimeWindow.Checked
             TimeWindowStart      = $timeStart
             TimeWindowEnd        = $timeEnd
+            EnableLogRotation    = [bool]$chkLogRotation.Checked
+            LogRetentionDays     = $retentionDays
         }
         $newConfig | ConvertTo-Json | Set-Content -Path $configPath -Encoding UTF8
         [System.Windows.Forms.MessageBox]::Show("设置已保存！", "成功", "OK", "Information")
@@ -433,10 +461,10 @@ $btnHelp.Add_Click({
         Start-Process "notepad.exe" $readmePath
     } else {
         [System.Windows.Forms.MessageBox]::Show(
-            "帮助文件未找到，请确认安装完整。`n路径：$readmePath",
-            "错误",
-            "OK",
-            "Error"
+                "帮助文件未找到，请确认安装完整。`n路径：$readmePath",
+                "错误",
+                "OK",
+                "Error"
         )
     }
 })
@@ -473,10 +501,10 @@ $btnClearLog.Add_Click({
         schtasks /run /tn "AutoSleep" 2>&1 | Out-Null
     } catch {
         [System.Windows.Forms.MessageBox]::Show(
-            "清空失败：`n$($_.Exception.Message)",
-            "错误",
-            "OK",
-            "Error"
+                "清空失败：`n$($_.Exception.Message)",
+                "错误",
+                "OK",
+                "Error"
         )
     }
 })
@@ -504,10 +532,10 @@ Get-Content 'C:\ProgramData\AutoSleep\AutoSleep.log' -Wait
         )
     } else {
         [System.Windows.Forms.MessageBox]::Show(
-            "日志文件尚未生成，请先运行 AutoSleep 主程序。`n路径：$logFile",
-            "提示",
-            "OK",
-            "Information"
+                "日志文件尚未生成，请先运行 AutoSleep 主程序。`n路径：$logFile",
+                "提示",
+                "OK",
+                "Information"
         )
     }
 })
@@ -517,11 +545,9 @@ $form.Controls.Add($btnShowLog)
 $top += $rowHeight + 10
 
 $btnToggleHibernate = New-Object System.Windows.Forms.Button
-# 动态文本在刷新函数中设置
 $btnToggleHibernate.Location = New-Point 150 $top
 $btnToggleHibernate.Size = New-Object System.Drawing.Size(160, 30)
 
-# 刷新休眠开关按钮状态和界面
 function Refresh-HibernateUI {
     $hibernateOn = Get-HibernateStatus
     if ($hibernateOn) {
@@ -529,11 +555,9 @@ function Refresh-HibernateUI {
     } else {
         $btnToggleHibernate.Text = "开启休眠"
     }
-    # 更新状态标签
     $lblHibernateStatus.Text = if ($hibernateOn) { "✅ 休眠功能已开启" } else { "⚠️ 休眠功能未开启，仅可使用睡眠模式" }
     $lblHibernateStatus.ForeColor = if ($hibernateOn) { [System.Drawing.Color]::LightGreen } else { [System.Drawing.Color]::Goldenrod }
 
-    # 更新下拉框：休眠关闭时移除 Hibernate 选项
     $currentSelected = $comboMode.SelectedItem
     $comboMode.Items.Clear()
     if ($hibernateOn) {
@@ -546,7 +570,6 @@ function Refresh-HibernateUI {
     } else {
         $comboMode.Items.Add("Sleep")
         $comboMode.SelectedItem = "Sleep"
-        # 如果配置中是 Hibernate，自动切换为 Sleep 并保存
         $config = Get-Content $configPath -Raw | ConvertFrom-Json
         if ($config.PowerAction -eq "Hibernate") {
             $config.PowerAction = "Sleep"
@@ -590,19 +613,17 @@ $btnToggleHibernate.Add_Click({
         } else {
             powercfg -h on
         }
-        # 刷新界面
         Refresh-HibernateUI
         [System.Windows.Forms.MessageBox]::Show(
-            "休眠功能已" + $(if ($hibernateOn) { "关闭" } else { "开启" }) + "。",
-            "操作完成",
-            "OK",
-            "Information"
+                "休眠功能已" + $(if ($hibernateOn) { "关闭" } else { "开启" }) + "。",
+                "操作完成",
+                "OK",
+                "Information"
         )
     }
 })
 $form.Controls.Add($btnToggleHibernate)
 
-# ---- 按钮行2：标签说明 ----
 $lblHibernateHint = New-Object System.Windows.Forms.Label
 $lblHibernateHint.Text = "点击按钮可在系统级开关休眠功能"
 $lblHibernateHint.Location = New-Point 20 ($top + 5)
@@ -611,7 +632,6 @@ $lblHibernateHint.ForeColor = [System.Drawing.Color]::Gray
 $lblHibernateHint.Font = New-Object System.Drawing.Font("微软雅黑", 8)
 $form.Controls.Add($lblHibernateHint)
 
-# 初始化界面
 Refresh-HibernateUI
 
 $form.ShowDialog()

@@ -89,9 +89,53 @@ if ($taskExists) {
 # ---- 阶段2：准备与配置 ----
 Write-Log "----- 阶段2：准备与配置 -----" -Color "Cyan"
 
+# ---- 检测是否为升级安装 ----
+$isUpgrade = Test-Path "$targetDir\settings.json"
+$oldConfig = $null
+$logBackupPath = "$env:TEMP\AutoSleep.log.bak"
+
+if ($isUpgrade) {
+    Write-Log "检测到升级安装，执行前置备份..." -Color "Cyan"
+
+    # 1. 备份日志（如果存在） - 使用不同变量名避免覆盖部署日志路径
+    $sourceLogFile = "$targetDir\AutoSleep.log"
+    if (Test-Path $sourceLogFile) {
+        Copy-Item -Path $sourceLogFile -Destination $logBackupPath -Force -ErrorAction SilentlyContinue
+        Write-Log "✅ 日志已备份到 $logBackupPath" -Color "Green"
+    }else {
+        Write-Log "ℹ️ 日志文件不存在，跳过备份" -Color "Yellow"
+    }
+
+    # 2. 提取旧配置（所有键值对）
+    try {
+        $oldConfig = Get-Content "$targetDir\settings.json" -Raw | ConvertFrom-Json
+        Write-Log "✅ 旧配置已提取（共 $($oldConfig.PSObject.Properties.Count) 个字段）" -Color "Green"
+    } catch {
+        Write-Log "⚠️ 无法读取旧配置，将使用默认配置" -Color "Yellow"
+        $oldConfig = $null
+    }
+
+    # 3. 执行现有 Uninstall.exe（完整卸载）
+    $uninstallExe = "$targetDir\Uninstall.exe"
+    if (Test-Path $uninstallExe) {
+        Write-Log "正在执行卸载程序 $uninstallExe ..." -Color "Cyan"
+        $proc = Start-Process -FilePath $uninstallExe -Wait -PassThru -WindowStyle Hidden
+        if ($proc.ExitCode -eq 0) {
+            Write-Log "✅ 卸载完成（退出码 0）" -Color "Green"
+        } else {
+            Write-Log "⚠️ 卸载退出码：$($proc.ExitCode)，继续安装..." -Color "Yellow"
+        }
+        # 等待文件系统同步
+        Start-Sleep -Seconds 2
+    } else {
+        Write-Log "⚠️ 未找到 Uninstall.exe，跳过卸载步骤" -Color "Yellow"
+    }
+}
+
+# 重新创建目标目录
 if (-not (Test-Path $targetDir)) {
     New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
-    Write-Log "✅ 已创建目录 $targetDir" -Color "Green"
+    Write-Log "✅ 已重新创建目录 $targetDir" -Color "Green"
 }
 
 # 复制主脚本
@@ -105,14 +149,12 @@ Copy-Item -Path $sourceScript -Destination $targetScript -Force
 Write-Log "✅ 已复制 AutoSleep.ps1 到 $targetScript" -Color "Green"
 
 # ---- 检测休眠状态并询问用户（仅在首次安装时） ----
-$isUpgrade = Test-Path "$targetDir\settings.json"
 $enableHibernate = $true
 $defaultPowerAction = "Hibernate"
 
 if (-not $isUpgrade) {
     Write-Log "检测到首次安装，检查休眠功能状态..." -Color "Cyan"
 
-    # 检测当前休眠状态
     $hibernateReg = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Power" -Name "HibernateEnabled" -ErrorAction SilentlyContinue
     $hibernateCurrentlyOn = ($hibernateReg -and $hibernateReg.HibernateEnabled -eq 1)
 
@@ -121,7 +163,6 @@ if (-not $isUpgrade) {
         $enableHibernate = $true
         $defaultPowerAction = "Hibernate"
     } else {
-        # 计算休眠文件实际/预计占用大小
         $hiberFile = Get-ChildItem -Path "C:\" -Filter "hiberfil.sys" -Force -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($hiberFile) {
             $hibernateSizeGB = [math]::Round($hiberFile.Length / 1GB, 1)
@@ -156,15 +197,14 @@ if (-not $isUpgrade) {
     $hibernateCurrentlyOn = ($hibernateReg -and $hibernateReg.HibernateEnabled -eq 1)
     $enableHibernate = $hibernateCurrentlyOn
 
-    # 从现有配置读取 PowerAction，保持用户原有选择
-    try {
-        $existingConfig = Get-Content "$targetDir\settings.json" -Raw | ConvertFrom-Json
-        $defaultPowerAction = $existingConfig.PowerAction
-        Write-Log "✅ 升级安装，沿用现有配置（PowerAction = $defaultPowerAction）" -Color "Green"
-    } catch {
-        # 如果配置文件损坏，回退到默认
+    # 从现有配置读取 PowerAction（如果有旧配置备份，则使用旧值）
+    if ($oldConfig -and $oldConfig.PowerAction) {
+        $defaultPowerAction = $oldConfig.PowerAction
+        Write-Log "✅ 升级安装，从旧配置恢复 PowerAction = $defaultPowerAction" -Color "Green"
+    } else {
+        # 没有旧配置或无法读取，使用默认
         $defaultPowerAction = "Hibernate"
-        Write-Log "⚠️ 无法读取现有配置，使用默认值" -Color "Yellow"
+        Write-Log "⚠️ 无法从旧配置读取 PowerAction，使用默认值" -Color "Yellow"
     }
 }
 
@@ -204,29 +244,44 @@ $defaultConfig = @{
     ClearLogOnNextRun    = $false
     EnableDiskCheck      = $true
     DiskThresholdKBps    = 10240
+    EnableLogRotation    = $false
+    LogRetentionDays     = 30
 }
 
-# 如果是升级安装且配置文件存在，不覆盖已有配置（只补充缺失字段）
-if ($isUpgrade -and (Test-Path "$targetDir\settings.json")) {
-    try {
-        $existingConfig = Get-Content "$targetDir\settings.json" -Raw | ConvertFrom-Json
-        foreach ($key in $defaultConfig.Keys) {
-            if ($null -eq $existingConfig.$key) {
-                $existingConfig | Add-Member -MemberType NoteProperty -Name $key -Value $defaultConfig[$key] -Force
-            }
-        }
-        # 保留用户原有的 PowerAction（除非当前休眠状态与配置不一致）
-        # 但我们在前面已经根据现有配置读取了 defaultPowerAction，所以这里不需要额外调整
-        $existingConfig | ConvertTo-Json | Set-Content -Path "$targetDir\settings.json" -Encoding UTF8
-        Write-Log "✅ 已更新配置文件（保留用户原有设置，补充新字段）" -Color "Green"
-    } catch {
-        # 如果配置文件损坏，直接覆盖
-        $defaultConfig | ConvertTo-Json | Set-Content -Path "$targetDir\settings.json" -Encoding UTF8
-        Write-Log "✅ 已重新生成默认配置文件（原配置文件损坏）" -Color "Yellow"
+$configPath = "$targetDir\settings.json"
+
+# ---- 生成配置：优先使用旧配置，补充默认值 ----
+if ($oldConfig) {
+    # 先构建新配置：默认值 + 旧配置覆盖
+    $newConfig = @{}
+    foreach ($key in $defaultConfig.Keys) {
+        $newConfig[$key] = $defaultConfig[$key]  # 先放默认值
     }
+    foreach ($key in $oldConfig.PSObject.Properties.Name) {
+        if ($newConfig.ContainsKey($key)) {
+            $newConfig[$key] = $oldConfig.$key
+            Write-Log "  恢复配置: $key = $($oldConfig.$key)" -Color "Gray"
+        } else {
+            # 旧配置中有新版本没有的字段（可能已废弃），忽略
+            Write-Log "  忽略旧字段: $key（新版本已移除）" -Color "Gray"
+        }
+    }
+    $newConfig | ConvertTo-Json | Set-Content -Path $configPath -Encoding UTF8
+    Write-Log "✅ 已生成配置文件（恢复用户旧配置，补充新字段默认值）" -Color "Green"
 } else {
-    $defaultConfig | ConvertTo-Json | Set-Content -Path "$targetDir\settings.json" -Encoding UTF8
-    Write-Log "✅ 已生成默认配置文件 settings.json" -Color "Green"
+    # 首次安装或无法读取旧配置，直接使用默认值
+    $defaultConfig | ConvertTo-Json | Set-Content -Path $configPath -Encoding UTF8
+    Write-Log "✅ 已生成默认配置文件 settings.json（使用默认值）" -Color "Green"
+}
+
+# ---- 恢复日志 ----
+if ($isUpgrade -and (Test-Path $logBackupPath)) {
+    if (Test-Path $sourceLogFile) {
+        Write-Log "✅ 日志已恢复" -Color "Green"
+    } else {
+        Write-Log "⚠️ 恢复日志时捕获到异常：" -Color "Yellow"
+    }
+    Remove-Item $logBackupPath -Force -ErrorAction SilentlyContinue
 }
 
 # 复制设置程序
@@ -235,7 +290,6 @@ if (Test-Path $sourceSettings) {
     Copy-Item -Path $sourceSettings -Destination "$targetDir\Settings.ps1" -Force
     Write-Log "✅ 已复制设置程序 Settings.ps1" -Color "Green"
 
-    # 创建桌面快捷方式
     $desktopPath = [Environment]::GetFolderPath("Desktop")
     $shortcutPath = Join-Path $desktopPath "AutoSleep 设置.lnk"
     $ws = New-Object -ComObject WScript.Shell
@@ -347,7 +401,7 @@ if (Test-Path $regPath) {
 }
 New-Item -Path $regPath -Force | Out-Null
 Set-ItemProperty -Path $regPath -Name "DisplayName" -Value "AutoSleep 智能休眠工具"
-Set-ItemProperty -Path $regPath -Name "DisplayVersion" -Value "1.0.3"
+Set-ItemProperty -Path $regPath -Name "DisplayVersion" -Value "1.0.4"
 Set-ItemProperty -Path $regPath -Name "Publisher" -Value "Cesium-developer"
 Set-ItemProperty -Path $regPath -Name "InstallLocation" -Value $targetDir
 Set-ItemProperty -Path $regPath -Name "UninstallString" -Value "$targetDir\Uninstall.exe"

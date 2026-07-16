@@ -56,6 +56,12 @@ if ($null -eq $config.EnableDiskCheck) {
 if ($null -eq $config.DiskThresholdKBps) {
     $config | Add-Member -MemberType NoteProperty -Name "DiskThresholdKBps" -Value 10240 -Force
 }
+if ($null -eq $config.EnableLogRotation) {
+    $config | Add-Member -MemberType NoteProperty -Name "EnableLogRotation" -Value $false -Force
+}
+if ($null -eq $config.LogRetentionDays) {
+    $config | Add-Member -MemberType NoteProperty -Name "LogRetentionDays" -Value 30 -Force
+}
 
 $powerAction          = $config.PowerAction
 $durationMin          = $config.DurationMin
@@ -72,12 +78,15 @@ $protectedProcesses   = $config.ProtectedProcesses
 $enableTimeWindow     = $config.EnableTimeWindow
 $timeWindowStart      = $config.TimeWindowStart
 $timeWindowEnd        = $config.TimeWindowEnd
+$enableLogRotation    = $config.EnableLogRotation
+$logRetentionDays     = $config.LogRetentionDays
 
 $sleepSeconds  = [Math]::Max(1, $config.Interval - 2)
 
 $elapsed = 0
 $lastCheckTime = Get-Date
 $lastLogTime = Get-Date
+$lastRotationCheck = Get-Date
 
 Write-Host "Monitoring started. Idle for $durationMin minute(s) will trigger $powerAction."
 
@@ -161,6 +170,23 @@ function Show-CountdownDialog {
     return $script:canceled
 }
 
+# ---- 日志轮转函数 ----
+function Invoke-LogRotation {
+    $logFile = "C:\ProgramData\AutoSleep\AutoSleep.log"
+    if (-not (Test-Path $logFile)) {
+        return
+    }
+    $fileInfo = Get-Item $logFile
+    $ageDays = ((Get-Date) - $fileInfo.CreationTime).Days
+    if ($ageDays -ge $logRetentionDays) {
+        Write-Host "$(Get-Date -Format HH:mm:ss) Log rotation triggered (age: $ageDays days, limit: $logRetentionDays days)"
+        Stop-Transcript -ErrorAction SilentlyContinue
+        Remove-Item -Path $logFile -Force -ErrorAction SilentlyContinue
+        Start-Transcript -Path $logFile -Append
+        Write-Host "$(Get-Date -Format HH:mm:ss) Log rotation completed."
+    }
+}
+
 while ($true) {
     $now = Get-Date
     $deltaSeconds = ($now - $lastCheckTime).TotalSeconds
@@ -186,6 +212,12 @@ while ($true) {
         $config.ClearLogOnNextRun = $false
         $config | ConvertTo-Json | Set-Content -Path $configPath -Encoding UTF8
         Write-Host "Log cleared and transcript restarted."
+    }
+
+    # ---- 日志轮转（每1小时检查一次） ----
+    if ($enableLogRotation -and ((Get-Date) - $lastRotationCheck).TotalHours -ge 1) {
+        Invoke-LogRotation
+        $lastRotationCheck = Get-Date
     }
 
     # ---- 时间窗口 ----
@@ -280,7 +312,7 @@ while ($true) {
         $cpuSample = Get-Counter '\Processor(_Total)\% Processor Time' -ErrorAction Stop
         $raw = $cpuSample.CounterSamples.CookedValue
         if ($raw -is [array]) {
-            $cpu = [double]$raw[0]    # 取第一个样本（与原行为最接近）
+            $cpu = [double]$raw[0]
         } else {
             $cpu = [double]$raw
         }
