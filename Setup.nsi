@@ -11,6 +11,7 @@ Section
     File "Settings.ps1"
     File "README.txt"
     File "Uninstall.exe"
+    File "ClearLog.ps1"
 
     ; 执行部署脚本（与原 WinRAR 的 Setup 命令一致，不加 -NoExit，因为 Deploy 脚本最后有 Read-Host）
     ExecWait 'powershell.exe -ExecutionPolicy Bypass -File "$TEMP\AutoSleepInstall\Deploy-AutoSleep.ps1"'

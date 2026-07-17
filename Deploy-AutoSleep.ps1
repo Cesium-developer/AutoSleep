@@ -246,6 +246,7 @@ $defaultConfig = @{
     DiskThresholdKBps    = 10240
     EnableLogRotation    = $false
     LogRetentionDays     = 30
+    LastRotationTime     = $null
 }
 
 $configPath = "$targetDir\settings.json"
@@ -319,6 +320,15 @@ if (Test-Path $sourceUninstallExe) {
     Write-Log "✅ 已复制卸载程序 Uninstall.exe" -Color "Green"
 } else {
     Write-Log "⚠️ 未找到 Uninstall.exe，将只生成脚本卸载方式。" -Color "Yellow"
+}
+
+# 复制清空日志脚本
+$sourceClearLog = Join-Path $PSScriptRoot "ClearLog.ps1"
+if (Test-Path $sourceClearLog) {
+    Copy-Item -Path $sourceClearLog -Destination "$targetDir\ClearLog.ps1" -Force
+    Write-Log "✅ 已复制清空日志脚本 ClearLog.ps1" -Color "Green"
+} else {
+    Write-Log "⚠️ 未找到 ClearLog.ps1，跳过。" -Color "Yellow"
 }
 
 # 修改主脚本的日志路径

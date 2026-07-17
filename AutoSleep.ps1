@@ -173,17 +173,32 @@ function Show-CountdownDialog {
 # ---- 日志轮转函数 ----
 function Invoke-LogRotation {
     $logFile = "C:\ProgramData\AutoSleep\AutoSleep.log"
-    if (-not (Test-Path $logFile)) {
-        return
+    if (-not (Test-Path $logFile)) { return }
+
+    $config = Get-Content $configPath -Raw | ConvertFrom-Json
+    if ($null -eq $config.LastRotationTime) {
+        $fileInfo = Get-Item $logFile
+        $initTime = $fileInfo.CreationTime.ToString("yyyy-MM-dd HH:mm:ss")
+        $config | Add-Member -MemberType NoteProperty -Name "LastRotationTime" -Value $initTime -Force
+        $config | ConvertTo-Json | Set-Content -Path $configPath -Encoding UTF8
     }
-    $fileInfo = Get-Item $logFile
-    $ageDays = ((Get-Date) - $fileInfo.CreationTime).Days
+
+    $lastRotationStr = $config.LastRotationTime
+    if ($lastRotationStr -is [string]) {
+        $lastRotation = [datetime]::ParseExact($lastRotationStr, "yyyy-MM-dd HH:mm:ss", $null)
+    } else {
+        $lastRotation = [datetime]$lastRotationStr
+    }
+    $ageDays = ((Get-Date) - $lastRotation).Days
+
     if ($ageDays -ge $logRetentionDays) {
-        Write-Host "$(Get-Date -Format HH:mm:ss) Log rotation triggered (age: $ageDays days, limit: $logRetentionDays days)"
-        Stop-Transcript -ErrorAction SilentlyContinue
-        Remove-Item -Path $logFile -Force -ErrorAction SilentlyContinue
-        Start-Transcript -Path $logFile -Append
-        Write-Host "$(Get-Date -Format HH:mm:ss) Log rotation completed."
+        Write-Host "$(Get-Date -Format HH:mm:ss) Log rotation triggered, launching ClearLog.ps1..."
+
+        # 直接启动独立的清空脚本文件（无转义问题）
+        $clearScript = "C:\ProgramData\AutoSleep\ClearLog.ps1"
+        Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$clearScript`"" -WindowStyle Hidden
+
+        Write-Host "$(Get-Date -Format HH:mm:ss) ClearLog.ps1 launched."
     }
 }
 
@@ -389,6 +404,8 @@ while ($true) {
         $lastLogTime = Get-Date
         Start-Sleep -Seconds 5
     }
+
+    Write-Host "检查时间： $(((Get-Date) - $lastRotationCheck).TotalHours)"
 
     Start-Sleep -Seconds $sleepSeconds
 }
