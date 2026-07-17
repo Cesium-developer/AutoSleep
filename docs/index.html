@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- 微信卡片抓取标签（Open Graph） -->
+<meta property="og:title" content="AutoSleep：让电脑自己乖乖睡觉" />
+<meta property="og:description" content="基于 CPU/GPU/磁盘/网络/用户输入/进程白名单的多维度检测，条件满足时自动触发睡眠。" />
+<meta property="og:image" content="https://cesium-developer.github.io/AutoSleep/images/settings.png" />
+<meta property="og:url" content="https://cesium-developer.github.io/AutoSleep/" />
+<meta property="og:type" content="website" />
+
+<title>AutoSleep</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d1b2a;
+    color: #e0e1dd;
+    font-family: "Courier New", "SimHei", monospace;
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 20px;
+    line-height: 1.8;
+  }
+  .manual {
+    border: 2px solid #415a77;
+    padding: 30px 25px;
+    margin-top: 20px;
+    position: relative;
+  }
+  .manual::before {
+    content: "AUTOSLEEP";
+    position: absolute;
+    top: -12px;
+    left: 20px;
+    background: #0d1b2a;
+    padding: 0 10px;
+    color: #778da9;
+    font-size: 12px;
+    letter-spacing: 3px;
+  }
+  h1 {
+    text-align: center;
+    font-size: 22px;
+    letter-spacing: 4px;
+    color: #e0e1dd;
+    margin-bottom: 8px;
+    border-bottom: 1px dashed #415a77;
+    padding-bottom: 12px;
+  }
+  .subtitle {
+    text-align: center;
+    color: #778da9;
+    font-size: 13px;
+    margin-bottom: 30px;
+  }
+  .step {
+    margin-bottom: 28px;
+    padding-left: 15px;
+    border-left: 3px solid #415a77;
+  }
+  .step-num {
+    color: #778da9;
+    font-size: 12px;
+    letter-spacing: 2px;
+    margin-bottom: 6px;
+  }
+  .step h3 {
+    font-size: 16px;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+  .step p {
+    font-size: 14px;
+    color: #b0b8c4;
+  }
+  .step code {
+    background: #1b2838;
+    padding: 2px 6px;
+    font-size: 13px;
+    color: #a8d8a8;
+  }
+  .screenshot {
+    text-align: center;
+    margin: 20px 0;
+  }
+  .screenshot img {
+    max-width: 100%;
+    border: 1px solid #415a77;
+    border-radius: 2px;
+  }
+  .screenshot .caption {
+    font-size: 12px;
+    color: #778da9;
+    margin-top: 6px;
+  }
+  .dl-btn {
+    display: block;
+    text-align: center;
+    margin: 30px auto;
+    padding: 14px;
+    border: 2px solid #778da9;
+    color: #e0e1dd;
+    text-decoration: none;
+    font-size: 15px;
+    letter-spacing: 2px;
+    transition: 0.2s;
+  }
+  .dl-btn:hover {
+    background: #1b2838;
+    border-color: #e0e1dd;
+  }
+  .footer {
+    text-align: center;
+    color: #415a77;
+    font-size: 12px;
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px dashed #415a77;
+  }
+  .footer a {
+    color: #778da9;
+    text-decoration: none;
+  }
+  .checklist {
+    list-style: none;
+    padding: 0;
+  }
+  .checklist li {
+    padding: 3px 0;
+    font-size: 14px;
+    color: #b0b8c4;
+  }
+  .checklist li::before {
+    content: "[ ] ";
+    color: #778da9;
+  }
+  .checklist li.done::before {
+    content: "[✓] ";
+    color: #a8d8a8;
+  }
+
+  @media (max-width: 480px) {
+    .manual { padding: 20px 15px; }
+    h1 { font-size: 18px; letter-spacing: 2px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="manual">
+  <h1>AutoSleep</h1>
+  <div class="subtitle">—— 让电脑自己乖乖睡觉 ——</div>
+
+  <p style="text-align:center;color:#b0b8c4;margin-bottom:30px;font-size:14px;">
+    电脑会在满足以下所有条件时进入睡眠：
+  </p>
+
+  <div style="margin-bottom:30px;padding:15px;background:#1b2838;font-size:13px;color:#b0b8c4;">
+    🖥️ CPU 使用率低于阈值<br>
+    🎮 GPU 使用率低于阈值<br>
+    💾 磁盘读写速度低于阈值<br>
+    🌐 网络流量低于阈值<br>
+    🖱️ 键盘或鼠标无输入<br>
+    📋 白名单进程未在运行
+  </div>
+
+  <p style="text-align:center;color:#778da9;font-size:12px;margin-bottom:30px;">
+    ▼ 以上所有条件持续达到设定时间后触发 ▼
+  </p>
+
+  <div class="step">
+    <div class="step-num">STEP 01</div>
+    <h3>📦 安装</h3>
+    <p>下载 <code>AutoSleep_Setup.exe</code>，双击运行，按提示完成安装即可。</p>
+  </div>
+
+  <div class="step">
+    <div class="step-num">STEP 02</div>
+    <h3>⚙️ 设置</h3>
+    <p>双击桌面上的「AutoSleep 设置」图标，可调整各项阈值和时间。</p>
+    <div class="screenshot">
+      <img src="../images/settings.png" alt="设置界面截图">
+      <div class="caption">▲ 设置界面</div>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">STEP 03</div>
+    <h3>✅ 运行</h3>
+    <p>安装完成后，程序在后台运行，根据上述条件自动判断是否触发睡眠。</p>
+  </div>
+
+  <a class="dl-btn" href="https://github.com/Cesium-developer/AutoSleep/releases">
+    ⬇ 下载安装包
+  </a>
+  <p style="text-align:center;color:#778da9;font-size:12px;">
+    支持 Windows 10 / 11 ｜ 免费 ｜ 不联网
+  </p>
+
+  <div class="footer">
+    <p>源码公开 · <a href="https://github.com/Cesium-developer/AutoSleep">GitHub 仓库</a></p>
+  </div>
+</div>
+
+</body>
+</html>
