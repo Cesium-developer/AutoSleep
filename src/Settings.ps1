@@ -2,6 +2,9 @@
 # Settings.ps1 - AutoSleep 设置程序（管理员权限版）
 # ============================================================
 
+# ---- 检测运行模式 ----
+$isExe = $MyInvocation.MyCommand.Path -match '\.exe$'
+
 # ---- 隐藏控制台窗口 ----
 Add-Type -Name Window -Namespace Console -MemberDefinition '
 [DllImport("kernel32.dll")]
@@ -15,11 +18,13 @@ if ($consoleHandle -ne [IntPtr]::Zero) {
     [Console.Window]::ShowWindow($consoleHandle, 0)
 }
 
-if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    $scriptPath = $MyInvocation.MyCommand.Path
-    $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
-    Start-Process powershell.exe -Verb RunAs -ArgumentList $arguments
-    exit
+if (-not $isExe) {
+    if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        $scriptPath = $MyInvocation.MyCommand.Path
+        $arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+        Start-Process powershell.exe -Verb RunAs -ArgumentList $arguments
+        exit
+    }
 }
 
 Add-Type -AssemblyName System.Windows.Forms

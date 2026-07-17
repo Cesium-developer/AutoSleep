@@ -1,16 +1,35 @@
-﻿; AutoSleep 安装程序（等效于原 WinRAR 自解压）
-OutFile "AutoSleep_Setup.exe"
+﻿; 根据宏设置输出文件名
+!ifndef EXE_VERSION
+  OutFile "AutoSleep_Setup_script.exe"
+!else
+  OutFile "AutoSleep_Setup_exe.exe"
+!endif
+
 RequestExecutionLevel admin
-SilentInstall normal   ; 正常显示解压进度，但不会阻挡后续窗口
+SilentInstall normal
 
 Section
     SetOutPath "$TEMP\AutoSleepInstall"
-    File "..\src\AutoSleep.ps1"
-    File "..\src\Deploy-AutoSleep.ps1"
-    File "..\src\Settings.ps1"
-    File "..\docs\README.txt"
-    File "..\src\Uninstall.exe"
-    File "..\src\ClearLog.ps1"
-    ExecWait 'powershell.exe -ExecutionPolicy Bypass -File "$TEMP\AutoSleepInstall\Deploy-AutoSleep.ps1"'
+
+    !ifndef EXE_VERSION
+        ; 脚本版：复制 .ps1 文件
+        File "..\src\AutoSleep.ps1"
+        File "..\src\Deploy-AutoSleep.ps1"
+        File "..\src\Settings.ps1"
+        File "..\src\Uninstall_script.exe"
+        File "..\src\ClearLog.ps1"
+        File "..\docs\README.txt"
+        ExecWait 'powershell.exe -ExecutionPolicy Bypass -File "$TEMP\AutoSleepInstall\Deploy-AutoSleep.ps1"'
+    !else
+        ; EXE 版：复制 .exe 文件
+        File "..\src\AutoSleep.exe"
+        File "..\src\Deploy-AutoSleep.exe"
+        File "..\src\Settings.exe"
+        File "..\src\Uninstall_exe.exe"
+        File "..\src\ClearLog.exe"
+        File "..\docs\README.txt"
+        ExecWait '"$TEMP\AutoSleepInstall\Deploy-AutoSleep.exe"'
+    !endif
+
     RMDir /r "$TEMP\AutoSleepInstall"
 SectionEnd
