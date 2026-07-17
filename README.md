@@ -18,6 +18,7 @@ Windows 智能电源管理守护工具：多条件感知，任务完成后自动
 | `Deploy-AutoSleep.ps1` | 部署脚本（复制文件、创建计划任务、写注册表） |
 | `Settings.ps1` | 图形化设置界面（WinForms） |
 | `Uninstall-AutoSleep.ps1` | 卸载逻辑（删除快捷方式、计划任务、注册表、自身） |
+| `ClearLog.ps1` | 日志轮转（重置日志） |
 | `Setup.nsi` | NSIS 安装包脚本（生成 `AutoSleep_Setup.exe`） |
 | `Uninstall.nsi` | NSIS 卸载包脚本（生成 `Uninstall.exe`） |
 | `README.txt` | 用户手册（打包进安装包） |
@@ -47,6 +48,7 @@ Windows 智能电源管理守护工具：多条件感知，任务完成后自动
 - Deploy-AutoSleep.ps1
 - Settings.ps1
 - Uninstall-AutoSleep.ps1
+- ClearLog.ps1
 - README.txt
 - Setup.nsi
 - Uninstall.nsi
@@ -78,7 +80,7 @@ Windows 智能电源管理守护工具：多条件感知，任务完成后自动
 1. 解压所有文件到 `%TEMP%\AutoSleepInstall`
 2. 以管理员权限执行 `Deploy-AutoSleep.ps1`
 3. `Deploy-AutoSleep.ps1` 完成：
-- 复制 `AutoSleep.ps1`、`Settings.ps1`、`README.txt`、`Uninstall.exe` 到 `C:\ProgramData\AutoSleep`
+- 复制 `AutoSleep.ps1`、`Settings.ps1`、`README.txt`、`Uninstall.exe`、`ClearLog.ps1` 到 `C:\ProgramData\AutoSleep`
 - 生成默认 `settings.json`
 - 创建桌面快捷方式 “AutoSleep 设置”
 - 创建计划任务 `AutoSleep`（开机 + 登录启动）
