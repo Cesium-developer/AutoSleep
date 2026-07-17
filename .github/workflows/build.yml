@@ -25,7 +25,7 @@ jobs:
         run: makensis installer\Uninstall.nsi
 
       - name: 移动卸载程序
-        run: move Uninstall.exe src\Uninstall.exe
+        run: move installer\Uninstall.exe src\Uninstall.exe
 
       - name: 编译安装程序
         run: makensis installer\Setup.nsi
