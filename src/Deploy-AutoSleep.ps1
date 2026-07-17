@@ -5,9 +5,6 @@
 $LogPath = Join-Path $env:TEMP "AutoSleepDeploy.log"
 if (Test-Path $LogPath) { Remove-Item $LogPath -Force }
 
-# ---- 检测运行模式 ----
-$isExe = $MyInvocation.MyCommand.Path -match '\.exe$'
-
 function Write-Log {
     param([string]$Message, [string]$Color = "White")
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -141,21 +138,15 @@ if (-not (Test-Path $targetDir)) {
     Write-Log "✅ 已重新创建目录 $targetDir" -Color "Green"
 }
 
-# 复制主脚本（根据模式选择 .ps1 或 .exe）
-if ($isExe) {
-    $sourceFile = Join-Path $PSScriptRoot "AutoSleep.exe"
-    $targetFile = "$targetDir\AutoSleep.exe"
-} else {
-    $sourceFile = Join-Path $PSScriptRoot "AutoSleep.ps1"
-    $targetFile = "$targetDir\AutoSleep.ps1"
-}
-if (-not (Test-Path $sourceFile)) {
-    Write-Log "❌ 未找到 $sourceFile，请确保它与部署脚本在同一目录。" -Color "Red"
+# 复制主脚本
+$sourceScript = Join-Path $PSScriptRoot "AutoSleep.ps1"
+if (-not (Test-Path $sourceScript)) {
+    Write-Log "❌ 未找到 AutoSleep.ps1，请确保它与部署脚本在同一目录。" -Color "Red"
     Read-Host "按 Enter 退出"
     exit 1
 }
-Copy-Item -Path $sourceFile -Destination $targetFile -Force
-Write-Log "✅ 已复制 $(Split-Path $sourceFile -Leaf) 到 $targetFile" -Color "Green"
+Copy-Item -Path $sourceScript -Destination $targetScript -Force
+Write-Log "✅ 已复制 AutoSleep.ps1 到 $targetScript" -Color "Green"
 
 # ---- 检测休眠状态并询问用户（仅在首次安装时） ----
 $enableHibernate = $true
@@ -294,35 +285,23 @@ if ($isUpgrade -and (Test-Path $logBackupPath)) {
     Remove-Item $logBackupPath -Force -ErrorAction SilentlyContinue
 }
 
-# 复制设置程序（根据模式选择 .ps1 或 .exe）
-if ($isExe) {
-    $sourceSettings = Join-Path $PSScriptRoot "Settings.exe"
-    $targetSettings = "$targetDir\Settings.exe"
-} else {
-    $sourceSettings = Join-Path $PSScriptRoot "Settings.ps1"
-    $targetSettings = "$targetDir\Settings.ps1"
-}
+# 复制设置程序
+$sourceSettings = Join-Path $PSScriptRoot "Settings.ps1"
 if (Test-Path $sourceSettings) {
-    Copy-Item -Path $sourceSettings -Destination $targetSettings -Force
-    Write-Log "✅ 已复制设置程序 $(Split-Path $sourceSettings -Leaf)" -Color "Green"
+    Copy-Item -Path $sourceSettings -Destination "$targetDir\Settings.ps1" -Force
+    Write-Log "✅ 已复制设置程序 Settings.ps1" -Color "Green"
 
-    # 创建桌面快捷方式（根据模式不同）
     $desktopPath = [Environment]::GetFolderPath("Desktop")
     $shortcutPath = Join-Path $desktopPath "AutoSleep 设置.lnk"
     $ws = New-Object -ComObject WScript.Shell
     $sc = $ws.CreateShortcut($shortcutPath)
-    if ($isExe) {
-        $sc.TargetPath = "$targetDir\Settings.exe"
-        $sc.Arguments = ""
-    } else {
-        $sc.TargetPath = "powershell.exe"
-        $sc.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$targetSettings`""
-    }
+    $sc.TargetPath = "powershell.exe"
+    $sc.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$targetDir\Settings.ps1`""
     $sc.WorkingDirectory = $targetDir
     $sc.Save()
     Write-Log "✅ 已创建桌面快捷方式：$shortcutPath" -Color "Green"
 } else {
-    Write-Log "⚠️ 未找到设置程序，跳过。" -Color "Yellow"
+    Write-Log "⚠️ 未找到 Settings.ps1，跳过设置程序复制。" -Color "Yellow"
 }
 
 # 复制帮助文档
@@ -334,64 +313,46 @@ if (Test-Path $sourceReadme) {
     Write-Log "⚠️ 未找到 README.txt，跳过。" -Color "Yellow"
 }
 
-# 复制卸载程序（脚本版用 Uninstall_script.exe，EXE 版用 Uninstall_exe.exe）
-if ($isExe) {
-    $sourceUninstall = Join-Path $PSScriptRoot "Uninstall_exe.exe"
+# 复制卸载 exe
+$sourceUninstallExe = Join-Path $PSScriptRoot "Uninstall.exe"
+if (Test-Path $sourceUninstallExe) {
+    Copy-Item -Path $sourceUninstallExe -Destination "$targetDir\Uninstall.exe" -Force
+    Write-Log "✅ 已复制卸载程序 Uninstall.exe" -Color "Green"
 } else {
-    $sourceUninstall = Join-Path $PSScriptRoot "Uninstall_script.exe"
-}
-if (Test-Path $sourceUninstall) {
-    Copy-Item -Path $sourceUninstall -Destination "$targetDir\Uninstall.exe" -Force
-    Write-Log "✅ 已复制卸载程序 $(Split-Path $sourceUninstall -Leaf) 为 Uninstall.exe" -Color "Green"
-} else {
-    Write-Log "⚠️ 未找到卸载程序，将只生成脚本卸载方式。" -Color "Yellow"
+    Write-Log "⚠️ 未找到 Uninstall.exe，将只生成脚本卸载方式。" -Color "Yellow"
 }
 
-# 复制清空日志（脚本版用 .ps1，EXE 版用 .exe）
-if ($isExe) {
-    $sourceClearLog = Join-Path $PSScriptRoot "ClearLog.exe"
-    $targetClearLog = "$targetDir\ClearLog.exe"
-} else {
-    $sourceClearLog = Join-Path $PSScriptRoot "ClearLog.ps1"
-    $targetClearLog = "$targetDir\ClearLog.ps1"
-}
+# 复制清空日志脚本
+$sourceClearLog = Join-Path $PSScriptRoot "ClearLog.ps1"
 if (Test-Path $sourceClearLog) {
-    Copy-Item -Path $sourceClearLog -Destination $targetClearLog -Force
-    Write-Log "✅ 已复制清空日志 $(Split-Path $sourceClearLog -Leaf)" -Color "Green"
+    Copy-Item -Path $sourceClearLog -Destination "$targetDir\ClearLog.ps1" -Force
+    Write-Log "✅ 已复制清空日志脚本 ClearLog.ps1" -Color "Green"
 } else {
-    Write-Log "⚠️ 未找到清空日志文件，跳过。" -Color "Yellow"
+    Write-Log "⚠️ 未找到 ClearLog.ps1，跳过。" -Color "Yellow"
 }
 
-# 修改主脚本的日志路径（仅脚本版需要）
-if (-not $isExe) {
-    $scriptContent = Get-Content $targetScript -Raw
-    $newLogPath = "C:\ProgramData\AutoSleep\AutoSleep.log"
-    $pattern = 'Start-Transcript -Path\s+"[^"]*"'
-    $replacement = 'Start-Transcript -Path "' + $newLogPath + '"'
-    $scriptContent = $scriptContent -replace $pattern, $replacement
-    if ($scriptContent -notmatch 'Start-Transcript') {
-        $scriptContent = $scriptContent -replace '(#Requires -RunAsAdministrator)', '$1' + "`nStart-Transcript -Path `"$newLogPath`" -Append"
-    }
-    Set-Content -Path $targetScript -Value $scriptContent -Encoding UTF8
-    Write-Log "✅ 已修改日志路径为 $newLogPath" -Color "Green"
-} else {
-    Write-Log "ℹ️ EXE 模式无需修改日志路径（已硬编码）" -Color "Cyan"
+# 修改主脚本的日志路径
+$scriptContent = Get-Content $targetScript -Raw
+$newLogPath = "C:\ProgramData\AutoSleep\AutoSleep.log"
+$pattern = 'Start-Transcript -Path\s+"[^"]*"'
+$replacement = 'Start-Transcript -Path "' + $newLogPath + '"'
+$scriptContent = $scriptContent -replace $pattern, $replacement
+if ($scriptContent -notmatch 'Start-Transcript') {
+    $scriptContent = $scriptContent -replace '(#Requires -RunAsAdministrator)', '$1' + "`nStart-Transcript -Path `"$newLogPath`" -Append"
 }
+Set-Content -Path $targetScript -Value $scriptContent -Encoding UTF8
+Write-Log "✅ 已修改日志路径为 $newLogPath" -Color "Green"
 
 Unblock-File -Path $targetScript -ErrorAction SilentlyContinue
 Write-Log "✅ 已解除脚本阻止标记" -Color "Green"
 
-# 创建计划任务（根据模式区分命令）
-if ($isExe) {
-    $taskAction = New-ScheduledTaskAction -Execute "$targetDir\AutoSleep.exe" -Argument ""
-} else {
-    $taskAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`""
-}
+# 创建计划任务
+$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$targetScript`""
 $trigger1 = New-ScheduledTaskTrigger -AtStartup
 $trigger2 = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $triggers = @($trigger1, $trigger2)
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-Register-ScheduledTask -TaskName "AutoSleep" -Action $taskAction -Trigger $triggers -Settings $settings -User $env:USERNAME -RunLevel Highest -ErrorAction Stop | Out-Null
+Register-ScheduledTask -TaskName "AutoSleep" -Action $action -Trigger $triggers -Settings $settings -User $env:USERNAME -RunLevel Highest -ErrorAction Stop | Out-Null
 Write-Log "✅ 已创建计划任务 'AutoSleep'（开机 + 登录启动）" -Color "Green"
 
 # ---- 生成备用卸载脚本 ----
@@ -479,12 +440,7 @@ if (Test-Path $logFile) {
 
 Write-Log "----- 阶段4：部署完成 -----" -Color "Cyan"
 Write-Log "部署详情：" -Color "White"
-if ($isExe) {
-    $mainFile = "AutoSleep.exe"
-} else {
-    $mainFile = "AutoSleep.ps1"
-}
-Write-Log "  主脚本位置：$targetDir\$mainFile" -Color "White"
+Write-Log "  主脚本位置：$targetScript" -Color "White"
 Write-Log "  日志文件位置：$newLogPath" -Color "White"
 Write-Log "  卸载程序位置：$targetDir\Uninstall.exe" -Color "White"
 Write-Log "  运行模式：$(if (-not $gpuAvailable) { '仅 CPU' } else { 'CPU + GPU' })" -Color "White"

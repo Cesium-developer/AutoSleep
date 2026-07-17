@@ -4,12 +4,8 @@ $logFile = "C:\ProgramData\AutoSleep\AutoSleep.log"
 $configPath = "C:\ProgramData\AutoSleep\settings.json"
 
 # 结束其他 AutoSleep 进程（排除当前后台进程）
-# ---- 检测运行模式 ----
-$isExe = $MyInvocation.MyCommand.Path -match '\.exe$'
-$processPattern = if ($isExe) { "*AutoSleep.exe*" } else { "*AutoSleep.ps1*" }
-
 Get-CimInstance -ClassName Win32_Process | Where-Object {
-    $_.CommandLine -like $processPattern -and $_.ProcessId -ne $PID
+    $_.CommandLine -like "*AutoSleep.ps1*" -and $_.ProcessId -ne $PID
 } | ForEach-Object {
     Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
 }

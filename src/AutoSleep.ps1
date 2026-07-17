@@ -21,9 +21,6 @@
 
 #Requires -RunAsAdministrator
 
-# ---- 检测运行模式 ----
-$isExe = $MyInvocation.MyCommand.Path -match '\.exe$'
-
 Start-Transcript -Path "C:\ProgramData\AutoSleep\AutoSleep.log" -Append
 
 $configPath = "C:\ProgramData\AutoSleep\settings.json"
@@ -198,13 +195,8 @@ function Invoke-LogRotation {
         Write-Host "$(Get-Date -Format HH:mm:ss) Log rotation triggered, launching ClearLog.ps1..."
 
         # 直接启动独立的清空脚本文件（无转义问题）
-        if ($isExe) {
-            $clearScript = "C:\ProgramData\AutoSleep\ClearLog.exe"
-            Start-Process -FilePath $clearScript -WindowStyle Hidden
-        } else {
-            $clearScript = "C:\ProgramData\AutoSleep\ClearLog.ps1"
-            Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$clearScript`"" -WindowStyle Hidden
-        }
+        $clearScript = "C:\ProgramData\AutoSleep\ClearLog.ps1"
+        Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$clearScript`"" -WindowStyle Hidden
 
         Write-Host "$(Get-Date -Format HH:mm:ss) ClearLog.ps1 launched."
     }

@@ -2,6 +2,10 @@
 # Uninstall-AutoSleep.ps1 - 无内部提权，直接执行（NSIS已提权）
 # ============================================================
 
+# ============================================================
+# Uninstall-AutoSleep.ps1 - 无内部提权，直接执行（NSIS已提权）
+# ============================================================
+
 $installDir = "C:\ProgramData\AutoSleep"
 $taskName = "AutoSleep"
 $uninstallRegKey = "HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\AutoSleep"
@@ -9,12 +13,8 @@ $uninstallRegKey = "HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall\Aut
 Write-Host "正在卸载 AutoSleep..." -ForegroundColor Cyan
 
 # 1. 结束所有 AutoSleep 进程
-# ---- 检测运行模式 ----
-$isExe = $MyInvocation.MyCommand.Path -match '\.exe$'
-$processPattern = if ($isExe) { "*AutoSleep.exe*" } else { "*AutoSleep.ps1*" }
-
 Get-Process -Name powershell -ErrorAction SilentlyContinue | Where-Object {
-    $_.CommandLine -like $processPattern -and $_.Id -ne $PID
+    $_.CommandLine -like "*AutoSleep.ps1*" -and $_.Id -ne $PID
 } | Stop-Process -Force -ErrorAction SilentlyContinue
 Write-Host "已结束 AutoSleep 后台进程" -ForegroundColor Green
 
