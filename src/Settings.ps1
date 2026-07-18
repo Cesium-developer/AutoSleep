@@ -73,7 +73,16 @@ $config.LogRetentionDays     = [int]$config.LogRetentionDays
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "AutoSleep 设置"
-$form.Size = New-Object System.Drawing.Size(480, 960)
+
+# 自适应窗口高度（小屏幕设备适配）
+Add-Type -AssemblyName System.Windows.Forms
+$screen = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+$formHeight = [Math]::Min(920, [Math]::Floor($screen.Height * 0.9))
+$form.Size = New-Object System.Drawing.Size(480, $formHeight)
+# 启用滚动条以防控件超出可视区域
+$form.AutoScroll = $true
+$form.AutoScrollMinSize = New-Object System.Drawing.Size(0, 920)
+
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
