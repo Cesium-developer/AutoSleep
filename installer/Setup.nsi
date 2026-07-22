@@ -11,6 +11,9 @@ Section
     File "..\docs\README.txt"
     File "..\src\Uninstall.exe"
     File "..\src\ClearLog.ps1"
+    File "..\src\editor.html"
+    File "..\src\http_server.ps1"
+
     ExecWait 'powershell.exe -ExecutionPolicy Bypass -File "$TEMP\AutoSleepInstall\Deploy-AutoSleep.ps1"'
     RMDir /r "$TEMP\AutoSleepInstall"
 SectionEnd

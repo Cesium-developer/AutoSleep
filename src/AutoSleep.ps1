@@ -62,6 +62,12 @@ if ($null -eq $config.EnableLogRotation) {
 if ($null -eq $config.LogRetentionDays) {
     $config | Add-Member -MemberType NoteProperty -Name "LogRetentionDays" -Value 30 -Force
 }
+if ($null -eq $config.CustomLogicEnabled) {
+    $config | Add-Member -MemberType NoteProperty -Name "CustomLogicEnabled" -Value $false -Force
+}
+if ($null -eq $config.CustomLogicTree) {
+    $config | Add-Member -MemberType NoteProperty -Name "CustomLogicTree" -Value $null -Force
+}
 
 $powerAction          = $config.PowerAction
 $durationMin          = $config.DurationMin
@@ -80,6 +86,7 @@ $timeWindowStart      = $config.TimeWindowStart
 $timeWindowEnd        = $config.TimeWindowEnd
 $enableLogRotation    = $config.EnableLogRotation
 $logRetentionDays     = $config.LogRetentionDays
+$cooldownUntil = (Get-Date).AddDays(-1)
 
 $sleepSeconds  = [Math]::Max(1, $config.Interval - 2)
 
@@ -202,12 +209,128 @@ function Invoke-LogRotation {
     }
 }
 
+# ---- 自定义逻辑求值 ----
+function Evaluate-CustomLogic {
+    param(
+        [object]$Tree,
+        [hashtable]$Values
+    )
+    if ($null -eq $Tree) { return @{ idle = $false; action = "none" } }
+
+    switch ($Tree.type) {
+        "program" {
+            if (-not $Tree.actions) { return @{ idle = $false; action = "none" } }
+            $result = @{ idle = $false; action = "none" }
+            foreach ($action in $Tree.actions) {
+                $result = Evaluate-CustomLogic -Tree $action -Values $Values
+                # 如果某个 action 返回了非 "none" 的动作，可以提前返回（或者继续执行后续）
+                # 但通常 program 按顺序执行，我们返回最后一个的结果
+            }
+            return $result
+        }
+        "condition" {
+            $cond = $Tree.condition
+            if ($Values.ContainsKey($cond)) {
+                return @{ idle = [bool]$Values[$cond]; action = "none" }
+            }
+            return @{ idle = $false; action = "none" }
+        }
+        "logic" {
+            $op = $Tree.operator
+            $children = $Tree.children
+            if ($op -eq "AND") {
+                foreach ($child in $children) {
+                    $childResult = Evaluate-CustomLogic -Tree $child -Values $Values
+                    if (-not $childResult.idle) {
+                        return @{ idle = $false; action = "none" }
+                    }
+                }
+                return @{ idle = $true; action = "none" }
+            } elseif ($op -eq "OR") {
+                foreach ($child in $children) {
+                    $childResult = Evaluate-CustomLogic -Tree $child -Values $Values
+                    if ($childResult.idle) {
+                        return @{ idle = $true; action = "none" }
+                    }
+                }
+                return @{ idle = $false; action = "none" }
+            } elseif ($op -eq "NOT") {
+                $childResult = Evaluate-CustomLogic -Tree $children[0] -Values $Values
+                return @{ idle = -not $childResult.idle; action = "none" }
+            }
+            return @{ idle = $false; action = "none" }
+        }
+        "control" {
+            # if 分支
+            if ($Tree.condition) {
+                $condResult = Evaluate-CustomLogic -Tree $Tree.condition -Values $Values
+                if ($condResult.idle) {
+                    if ($Tree.then -ne $null) {
+                        return Evaluate-CustomLogic -Tree $Tree.then -Values $Values
+                    }
+                    return @{ idle = $true; action = "none" }
+                }
+            }
+            # elif 列表
+            if ($Tree.elif -and $Tree.elif.Count -gt 0) {
+                foreach ($elif in $Tree.elif) {
+                    $elifCondResult = Evaluate-CustomLogic -Tree $elif.condition -Values $Values
+                    if ($elifCondResult.idle) {
+                        if ($elif.then -ne $null) {
+                            return Evaluate-CustomLogic -Tree $elif.then -Values $Values
+                        }
+                        return @{ idle = $true; action = "none" }
+                    }
+                }
+            }
+            # else 分支
+            if ($Tree.else -ne $null) {
+                return Evaluate-CustomLogic -Tree $Tree.else -Values $Values
+            }
+            return @{ idle = $false; action = "none" }
+        }
+        "action" {
+            # 根据动作类型返回不同的结果
+            switch ($Tree.action) {
+                "reset_timer" {
+                    # 重置计时器：返回 idle=false，但需要主循环执行重置操作
+                    return @{ idle = $false; action = "reset_timer" }
+                }
+                "continue_timer" {
+                    # 继续计时：返回 idle=true，表示条件满足且应该累加
+                    return @{ idle = $true; action = "continue_timer" }
+                }
+                "sleep" {
+                    # 立即睡眠：返回 idle=true，但主循环应该特殊处理
+                    return @{ idle = $true; action = "sleep" }
+                }
+                default {
+                    # 未知动作，默认当作 continue_timer
+                    return @{ idle = $true; action = "continue_timer" }
+                }
+            }
+        }
+        "sequence" {
+            if (-not $Tree.actions) { return @{ idle = $false; action = "none" } }
+            $result = @{ idle = $false; action = "none" }
+            foreach ($action in $Tree.actions) {
+                $result = Evaluate-CustomLogic -Tree $action -Values $Values
+            }
+            return $result
+        }
+        default {
+            Write-Host "警告：未知节点类型 '$($Tree.type)'" -ForegroundColor Yellow
+            return @{ idle = $false; action = "none" }
+        }
+    }
+}
+
 while ($true) {
     $now = Get-Date
     $deltaSeconds = ($now - $lastCheckTime).TotalSeconds
     $lastCheckTime = $now
 
-    # ---- 唤醒检测 ----
+    # ---- 唤醒检测（永远优先） ----
     if ($deltaSeconds -gt ($sleepSeconds * 5)) {
         Write-Host "$(Get-Date -Format HH:mm:ss) Wake from sleep, resetting timer."
         $elapsed = 0
@@ -218,7 +341,7 @@ while ($true) {
         continue
     }
 
-    # ---- 日志清空请求 ----
+    # ---- 日志清空请求（永远优先） ----
     if ($config.ClearLogOnNextRun -eq $true) {
         Write-Host "$(Get-Date -Format HH:mm:ss) Clear log requested, resetting transcript..."
         Stop-Transcript -ErrorAction SilentlyContinue
@@ -235,7 +358,12 @@ while ($true) {
         $lastRotationCheck = Get-Date
     }
 
+    # ============================================================
+    # 采集所有原始数据（两条线路共用）
+    # ============================================================
+
     # ---- 时间窗口 ----
+    $inWindow = $true
     if ($enableTimeWindow) {
         $hour = (Get-Date).Hour
         $start = $timeWindowStart
@@ -245,27 +373,12 @@ while ($true) {
         } else {
             $inWindow = ($hour -ge $start -or $hour -lt $end)
         }
-        if (-not $inWindow) {
-            if ($elapsed -gt 0) {
-                Write-Host "$(Get-Date -Format HH:mm:ss) Outside time window ($start-$end), idle mode."
-            }
-            $elapsed = 0
-            Start-Sleep -Seconds 60
-            continue
-        }
     }
 
     # ---- 用户活动 ----
+    $idleMs = 999999
     if ($enableUser) {
         $idleMs = [UserInput]::GetIdleMilliseconds()
-        if ($idleMs -lt 3000) {
-            if ($elapsed -gt 0) {
-                Write-Host "$(Get-Date -Format HH:mm:ss) User activity detected, timer reset."
-            }
-            $elapsed = 0
-            Start-Sleep -Seconds $sleepSeconds
-            continue
-        }
     }
 
     # ---- 网络活动 ----
@@ -275,12 +388,6 @@ while ($true) {
             $netSamples = (Get-Counter "\Network Interface(*)\Bytes Total/sec" -ErrorAction Stop).CounterSamples
             $netBytesPerSec = ($netSamples | Measure-Object -Property CookedValue -Sum).Sum
             $netKBps = $netBytesPerSec / 1024
-            if ($netKBps -gt $networkThresholdKBps) {
-                if ($elapsed -gt 0) {
-                    Write-Host "$(Get-Date -Format HH:mm:ss) Network activity detected ($([math]::Round($netKBps, 1)) KB/s), timer reset."
-                }
-                $elapsed = 0
-            }
         } catch {
             # 网络计数器不可用
         }
@@ -293,12 +400,6 @@ while ($true) {
             $diskSamples = (Get-Counter "\PhysicalDisk(*)\Disk Bytes/sec" -ErrorAction Stop).CounterSamples
             $diskBytesPerSec = ($diskSamples | Measure-Object -Property CookedValue -Sum).Sum
             $diskKBps = $diskBytesPerSec / 1024
-            if ($diskKBps -gt $diskThresholdKBps) {
-                if ($elapsed -gt 0) {
-                    Write-Host "$(Get-Date -Format HH:mm:ss) Disk activity detected ($([math]::Round($diskKBps, 1)) KB/s), timer reset."
-                }
-                $elapsed = 0
-            }
         } catch {
             # 磁盘计数器不可用
         }
@@ -314,26 +415,21 @@ while ($true) {
                 break
             }
         }
-        if ($runningProc) {
-            if ($elapsed -gt 0) {
-                Write-Host "$(Get-Date -Format HH:mm:ss) Protected process pattern '$runningProc' is running, timer reset."
-            }
-            $elapsed = 0
-        }
     }
 
     # ---- CPU / GPU ----
     try {
-        $cpuSample = Get-Counter '\Processor(_Total)\% Processor Time' -ErrorAction Stop
-        $raw = $cpuSample.CounterSamples.CookedValue
-        if ($raw -is [array]) {
-            $cpu = [double]$raw[0]
-        } else {
-            $cpu = [double]$raw
-        }
+        $cpuSample = Get-Counter '\Processor Information(_Total)\% Processor Time' -ErrorAction Stop
+        $cpu = [double]$cpuSample.CounterSamples.CookedValue
     } catch {
-        Write-Host "$(Get-Date -Format HH:mm:ss) 警告：读取 CPU 计数器失败：$_" -ForegroundColor Yellow
-        $cpu = 100.0
+        Write-Host "$(Get-Date -Format HH:mm:ss) 警告：Processor Information 计数器不可用，降级到 Processor" -ForegroundColor Yellow
+        try {
+            $cpuSample = Get-Counter '\Processor(_Total)\% Processor Time' -ErrorAction Stop
+            $cpu = [double]$cpuSample.CounterSamples.CookedValue
+        } catch {
+            Write-Host "$(Get-Date -Format HH:mm:ss) 警告：读取 CPU 计数器失败：$_" -ForegroundColor Yellow
+            $cpu = 100.0
+        }
     }
 
     if ($enableGpu) {
@@ -348,7 +444,175 @@ while ($true) {
         $gpu = 0
     }
 
-    $idle = ($cpu -lt $cpuThreshold -and $gpu -lt $gpuThreshold)
+    # ---- 条件变量化 ----
+    $cpuIdle = $cpu -lt $cpuThreshold
+    $gpuIdle = $enableGpu -eq $false -or $gpu -lt $gpuThreshold
+    $diskIdle = $enableDisk -eq $false -or $diskKBps -lt $diskThresholdKBps
+    $networkIdle = $enableNetwork -eq $false -or $netKBps -lt $networkThresholdKBps
+    $userIdle = $enableUser -eq $false -or $idleMs -ge 3000
+    $processIdle = $enableProcess -eq $false -or (-not $runningProc)
+    $timeWindowIdle = $enableTimeWindow -eq $false -or $inWindow
+
+    # ============================================================
+    # 分支1：自定义逻辑（如果启用）
+    # ============================================================
+    if ($config.CustomLogicEnabled -and $config.CustomLogicTree) {
+        $customResult = Evaluate-CustomLogic -Tree $config.CustomLogicTree -Values @{
+            "CPU"        = $cpuIdle
+            "GPU"        = $gpuIdle
+            "Disk"       = $diskIdle
+            "Network"    = $networkIdle
+            "User"       = $userIdle
+            "Process"    = $processIdle
+            "TimeWindow" = $timeWindowIdle
+        }
+        $idle = $customResult.idle
+        $action = $customResult.action
+
+        if ($idle) {
+            # 如果动作是 sleep，立即触发睡眠
+            if ($action -eq "sleep") {
+                Write-Host "$(Get-Date -Format HH:mm:ss) Custom logic: immediate sleep triggered"
+                $elapsed = $durationMin * 60   # 强制满足触发条件
+                # 直接跳到触发逻辑，不累加计时器
+            } else {
+                # 正常累加计时器（continue_timer 和其他动作）
+                $elapsed += $deltaSeconds
+            }
+
+            if (($now - $lastLogTime).TotalSeconds -ge 5) {
+                Write-Host "$(Get-Date -Format HH:mm:ss) Idle: $([math]::Round($elapsed, 1)) sec (CPU: $($cpu.ToString('F1'))%, GPU: $($gpu.ToString('F1'))%)"
+                if ($enableNetwork) {
+                    Write-Host "$(Get-Date -Format HH:mm:ss) Network: $([math]::Round($netKBps, 1)) KB/s"
+                }
+                if ($enableDisk) {
+                    Write-Host "$(Get-Date -Format HH:mm:ss) Disk: $([math]::Round($diskKBps, 1)) KB/s"
+                }
+                if ($enableProcess -and $protectedProcesses.Count -gt 0) {
+                    Write-Host "$(Get-Date -Format HH:mm:ss) Protected: $($runningProc)"
+                }
+                if ($enableTimeWindow) {
+                    Write-Host "$(Get-Date -Format HH:mm:ss) TimeWindow: $inWindow"
+                }
+                $lastLogTime = $now
+            }
+        } else {
+            if ($action -eq "reset_timer") {
+                Write-Host "$(Get-Date -Format HH:mm:ss) Timer reset by custom logic"
+                $elapsed = 0
+            } else {
+                if ($elapsed -gt 0) {
+                    Write-Host "$(Get-Date -Format HH:mm:ss) Load recovered, timer reset (CPU: $($cpu.ToString('F1'))%, GPU: $($gpu.ToString('F1'))%)"
+                }
+                $elapsed = 0
+            }
+        }
+
+        # ---- 触发 ----
+        if ($elapsed -ge ($durationMin * 60)) {
+            # 检查冷却期
+            if ((Get-Date) -lt $cooldownUntil) {
+                Write-Host "$(Get-Date -Format HH:mm:ss) In cooldown period (until $cooldownUntil), skipping sleep."
+                $elapsed = 0
+                Start-Sleep -Seconds $sleepSeconds
+                continue
+            }
+
+            Write-Host "$(Get-Date -Format HH:mm:ss) Condition met, showing countdown..."
+            $canceled = Show-CountdownDialog -seconds 10
+            if ($canceled) {
+                Write-Host "$(Get-Date -Format HH:mm:ss) User canceled sleep."
+                # 设置冷却期 10 分钟
+                $cooldownUntil = (Get-Date).AddMinutes(10)
+                Write-Host "$(Get-Date -Format HH:mm:ss) Cooldown set until $cooldownUntil"
+                $elapsed = 0
+                Start-Sleep -Seconds $sleepSeconds
+                continue
+            }
+
+            Write-Host "Executing $powerAction in 5 seconds..."
+            Start-Sleep -Seconds 5
+            Stop-Transcript
+
+            if ($powerAction -eq "Hibernate") {
+                shutdown /h
+            } elseif ($powerAction -eq "Sleep") {
+                [PowerManager]::SetSuspendState($false, $true, $false)
+            } else {
+                Write-Host "Unknown PowerAction: $powerAction" -ForegroundColor Red
+            }
+
+            Write-Host "Resuming monitoring after $powerAction..."
+            $elapsed = 0
+            $lastLogTime = Get-Date
+            Start-Sleep -Seconds 5
+        }
+
+        Write-Host "Log Rotation checking time： $(((Get-Date) - $lastRotationCheck).TotalHours) hour (Default checking is 1 hour.)"
+        Start-Sleep -Seconds $sleepSeconds
+        continue
+    }
+
+    # ============================================================
+    # 分支2：原有硬编码逻辑（自定义未启用时执行）
+    # ============================================================
+
+    # ---- 时间窗口 ----
+    if ($enableTimeWindow) {
+        if (-not $inWindow) {
+            if ($elapsed -gt 0) {
+                Write-Host "$(Get-Date -Format HH:mm:ss) Outside time window ($start-$end), idle mode."
+            }
+            $elapsed = 0
+            Start-Sleep -Seconds 60
+            continue
+        }
+    }
+
+    # ---- 用户活动 ----
+    if ($enableUser) {
+        if ($idleMs -lt 3000) {
+            if ($elapsed -gt 0) {
+                Write-Host "$(Get-Date -Format HH:mm:ss) User activity detected, timer reset."
+            }
+            $elapsed = 0
+            Start-Sleep -Seconds $sleepSeconds
+            continue
+        }
+    }
+
+    # ---- 网络活动 ----
+    if ($enableNetwork) {
+        if ($netKBps -gt $networkThresholdKBps) {
+            if ($elapsed -gt 0) {
+                Write-Host "$(Get-Date -Format HH:mm:ss) Network activity detected ($([math]::Round($netKBps, 1)) KB/s), timer reset."
+            }
+            $elapsed = 0
+        }
+    }
+
+    # ---- 磁盘活动 ----
+    if ($enableDisk) {
+        if ($diskKBps -gt $diskThresholdKBps) {
+            if ($elapsed -gt 0) {
+                Write-Host "$(Get-Date -Format HH:mm:ss) Disk activity detected ($([math]::Round($diskKBps, 1)) KB/s), timer reset."
+            }
+            $elapsed = 0
+        }
+    }
+
+    # ---- 进程白名单 ----
+    if ($enableProcess -and $protectedProcesses.Count -gt 0) {
+        if ($runningProc) {
+            if ($elapsed -gt 0) {
+                Write-Host "$(Get-Date -Format HH:mm:ss) Protected process pattern '$runningProc' is running, timer reset."
+            }
+            $elapsed = 0
+        }
+    }
+
+    # ---- CPU / GPU 空闲判断（硬编码 AND） ----
+    $idle = $cpuIdle -and $gpuIdle -and $diskIdle -and $networkIdle -and $userIdle -and $processIdle -and $timeWindowIdle
 
     if ($idle) {
         $elapsed += $deltaSeconds
@@ -378,10 +642,21 @@ while ($true) {
 
     # ---- 触发 ----
     if ($elapsed -ge ($durationMin * 60)) {
+        # 检查冷却期
+        if ((Get-Date) -lt $cooldownUntil) {
+            Write-Host "$(Get-Date -Format HH:mm:ss) In cooldown period (until $cooldownUntil), skipping sleep."
+            $elapsed = 0
+            Start-Sleep -Seconds $sleepSeconds
+            continue
+        }
+
         Write-Host "$(Get-Date -Format HH:mm:ss) Condition met, showing countdown..."
         $canceled = Show-CountdownDialog -seconds 10
         if ($canceled) {
             Write-Host "$(Get-Date -Format HH:mm:ss) User canceled sleep."
+            # 设置冷却期 10 分钟
+            $cooldownUntil = (Get-Date).AddMinutes(10)
+            Write-Host "$(Get-Date -Format HH:mm:ss) Cooldown set until $cooldownUntil"
             $elapsed = 0
             Start-Sleep -Seconds $sleepSeconds
             continue
@@ -405,7 +680,6 @@ while ($true) {
         Start-Sleep -Seconds 5
     }
 
-    Write-Host "检查时间： $(((Get-Date) - $lastRotationCheck).TotalHours)"
-
+    Write-Host "Log Rotation checking time： $(((Get-Date) - $lastRotationCheck).TotalHours) hour (Default checking is 1 hour.)"
     Start-Sleep -Seconds $sleepSeconds
 }

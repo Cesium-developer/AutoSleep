@@ -1,5 +1,5 @@
 ﻿# ============================================================
-# Deploy-AutoSleep.ps1 - 完整部署脚本（集成卸载 exe）
+# Deploy-AutoSleep.ps1 - 完整部署脚本
 # ============================================================
 
 $LogPath = Join-Path $env:TEMP "AutoSleepDeploy.log"
@@ -247,6 +247,8 @@ $defaultConfig = @{
     EnableLogRotation    = $false
     LogRetentionDays     = 30
     LastRotationTime     = $null
+    CustomLogicEnabled = $false
+    CustomLogicTree    = $null
 }
 
 $configPath = "$targetDir\settings.json"
@@ -267,7 +269,7 @@ if ($oldConfig) {
             Write-Log "  忽略旧字段: $key（新版本已移除）" -Color "Gray"
         }
     }
-    $newConfig | ConvertTo-Json | Set-Content -Path $configPath -Encoding UTF8
+    $newConfig | ConvertTo-Json -Depth 100 | Set-Content -Path $configPath -Encoding UTF8
     Write-Log "✅ 已生成配置文件（恢复用户旧配置，补充新字段默认值）" -Color "Green"
 } else {
     # 首次安装或无法读取旧配置，直接使用默认值
@@ -329,6 +331,24 @@ if (Test-Path $sourceClearLog) {
     Write-Log "✅ 已复制清空日志脚本 ClearLog.ps1" -Color "Green"
 } else {
     Write-Log "⚠️ 未找到 ClearLog.ps1，跳过。" -Color "Yellow"
+}
+
+# 复制 Blockly 逻辑编辑器
+$sourceEditor = Join-Path $PSScriptRoot "editor.html"
+if (Test-Path $sourceEditor) {
+    Copy-Item -Path $sourceEditor -Destination "$targetDir\editor.html" -Force
+    Write-Log "✅ 已复制逻辑编辑器 editor.html" -Color "Green"
+} else {
+    Write-Log "⚠️ 未找到 editor.html，跳过。" -Color "Yellow"
+}
+
+# 复制 HTTP 服务器脚本
+$sourceHttpServer = Join-Path $PSScriptRoot "http_server.ps1"
+if (Test-Path $sourceHttpServer) {
+    Copy-Item -Path $sourceHttpServer -Destination "$targetDir\http_server.ps1" -Force
+    Write-Log "✅ 已复制 HTTP 服务器脚本 http_server.ps1" -Color "Green"
+} else {
+    Write-Log "⚠️ 未找到 http_server.ps1，跳过。" -Color "Yellow"
 }
 
 # 修改主脚本的日志路径
@@ -411,7 +431,7 @@ if (Test-Path $regPath) {
 }
 New-Item -Path $regPath -Force | Out-Null
 Set-ItemProperty -Path $regPath -Name "DisplayName" -Value "AutoSleep 智能休眠工具"
-Set-ItemProperty -Path $regPath -Name "DisplayVersion" -Value "1.0.6"
+Set-ItemProperty -Path $regPath -Name "DisplayVersion" -Value "1.0.7"
 Set-ItemProperty -Path $regPath -Name "Publisher" -Value "Cesium-developer"
 Set-ItemProperty -Path $regPath -Name "InstallLocation" -Value $targetDir
 Set-ItemProperty -Path $regPath -Name "UninstallString" -Value "$targetDir\Uninstall.exe"

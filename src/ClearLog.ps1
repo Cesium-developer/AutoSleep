@@ -1,4 +1,4 @@
-# ClearLog.ps1 - 清空日志和更新配置（独立运行，不依赖主脚本上下文）
+# ClearLog.ps1 - 清空日志和更新配置
 
 $logFile = "C:\ProgramData\AutoSleep\AutoSleep.log"
 $configPath = "C:\ProgramData\AutoSleep\settings.json"

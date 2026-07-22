@@ -1,5 +1,5 @@
 ﻿# ============================================================
-# Settings.ps1 - AutoSleep 设置程序（管理员权限版）
+# Settings.ps1 - AutoSleep 设置程序
 # ============================================================
 
 # ---- 隐藏控制台窗口 ----
@@ -356,7 +356,7 @@ $txtTimeEnd.Text = $config.TimeWindowEnd.ToString()
 $form.Controls.Add($txtTimeEnd)
 $top += $rowHeight + 10
 
-# ---- 12. 日志轮转（新增） ----
+# ---- 12. 日志轮转 ----
 $chkLogRotation = New-Object System.Windows.Forms.CheckBox
 $chkLogRotation.Text = "启用日志轮转"
 $chkLogRotation.Location = New-Point $leftLabel $top
@@ -427,6 +427,10 @@ $btnSave.Add_Click({
     }
 
     try {
+        # 读取现有的 CustomLogicTree（如果存在）
+        $existingConfig = Get-Content $configPath -Raw | ConvertFrom-Json
+        $existingLogicTree = $existingConfig.CustomLogicTree
+
         $newConfig = @{
             PowerAction          = $comboMode.SelectedItem
             DurationMin          = $duration
@@ -446,8 +450,10 @@ $btnSave.Add_Click({
             TimeWindowEnd        = $timeEnd
             EnableLogRotation    = [bool]$chkLogRotation.Checked
             LogRetentionDays     = $retentionDays
+            CustomLogicEnabled   = [bool]$chkCustomLogic.Checked
+            CustomLogicTree = $existingLogicTree
         }
-        $newConfig | ConvertTo-Json | Set-Content -Path $configPath -Encoding UTF8
+        $newConfig | ConvertTo-Json -Depth 100 | Set-Content -Path $configPath -Encoding UTF8
         [System.Windows.Forms.MessageBox]::Show("设置已保存！", "成功", "OK", "Information")
 
         Get-CimInstance -ClassName Win32_Process | Where-Object { $_.CommandLine -like "*AutoSleep.ps1*" -and $_.ProcessId -ne $PID } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
@@ -550,8 +556,66 @@ Get-Content 'C:\ProgramData\AutoSleep\AutoSleep.log' -Wait
 })
 $form.Controls.Add($btnShowLog)
 
-# ---- 按钮行2：休眠开关 ----
+# ---- 按钮行2 ----
 $top += $rowHeight + 10
+
+$chkCustomLogic = New-Object System.Windows.Forms.CheckBox
+$chkCustomLogic.Text = "启用自定义逻辑"
+$chkCustomLogic.Location = New-Point 150 ($top + $rowHeight + 10)
+$chkCustomLogic.Size = New-Object System.Drawing.Size(160, 30)
+$chkCustomLogic.Checked = [bool]$config.CustomLogicEnabled
+$form.Controls.Add($chkCustomLogic)
+
+# ---- 自定义逻辑按钮 ----
+$btnCustomLogic = New-Object System.Windows.Forms.Button
+$btnCustomLogic.Text = "🧩 自定义逻辑"
+$btnCustomLogic.Location = New-Point 20 ($top + $rowHeight + 10)
+$btnCustomLogic.Size = New-Object System.Drawing.Size(120, 30)
+$btnCustomLogic.Add_Click({
+    $serverScriptPath = "C:\ProgramData\AutoSleep\http_server.ps1"
+
+    # ---- 先尝试优雅关闭旧服务器 ----
+    try {
+        Invoke-WebRequest -Uri "http://localhost:56790/shutdown" -Method Get -TimeoutSec 2 -ErrorAction Stop | Out-Null
+        Start-Sleep -Milliseconds 500
+    } catch {}
+
+    # ---- 强制终止残留进程 ----
+    Get-CimInstance -ClassName Win32_Process | Where-Object {
+        $_.CommandLine -like "*http_server.ps1*"
+    } | ForEach-Object {
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds 500
+
+    if (-not (Test-Path $serverScriptPath)) {
+        [System.Windows.Forms.MessageBox]::Show(
+                "服务器脚本未找到，请确认安装完整。`n路径：$serverScriptPath",
+                "错误",
+                "OK",
+                "Error"
+        )
+        return
+    }
+
+    # 启动新服务器
+    Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$serverScriptPath`"" -WindowStyle Hidden
+    Start-Sleep -Milliseconds 800
+
+    # 打开编辑器
+    $editorUrl = "http://localhost:56790/editor.html"
+    Start-Process $editorUrl
+})
+$form.Controls.Add($btnCustomLogic)
+
+# ---- 自定义逻辑提示 ----
+$lblCustomLogicInfo = New-Object System.Windows.Forms.Label
+$lblCustomLogicInfo.Text = "启用后，空闲判断将完全由逻辑树控制。阈值沿用当前设置，独立开关仅对默认模式生效。"
+$lblCustomLogicInfo.Location = New-Point 20 ($top + $rowHeight + 45)
+$lblCustomLogicInfo.Size = New-Object System.Drawing.Size(420, 35)
+$lblCustomLogicInfo.ForeColor = [System.Drawing.Color]::Gray
+$lblCustomLogicInfo.Font = New-Object System.Drawing.Font("微软雅黑", 8)
+$form.Controls.Add($lblCustomLogicInfo)
 
 $btnToggleHibernate = New-Object System.Windows.Forms.Button
 $btnToggleHibernate.Location = New-Point 150 $top
@@ -587,6 +651,7 @@ function Refresh-HibernateUI {
     }
 }
 
+# --- 休眠开关 ---
 $btnToggleHibernate.Add_Click({
     $hibernateOn = Get-HibernateStatus
     if ($hibernateOn) {
