@@ -1,4 +1,5 @@
-# AutoSleep
+# IdleNap
+> *AutoSleep* · 多条件判断 · 自定义规则 · 智能睡眠/休眠
 
 ![Build Status](https://github.com/Cesium-developer/AutoSleep/actions/workflows/build.yml/badge.svg)
 
