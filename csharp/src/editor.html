@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoSleep - 逻辑编辑器（自由插入版）</title>
+    <script src="https://cdn.jsdelivr.net/npm/blockly@13.1.1/blockly.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/blockly@13.1.1/locale/zh-hans/zh-hans.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #1a1e2c;
+            color: #e0e1dd;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        .header {
+            padding: 10px 20px;
+            background: #141a26;
+            border-bottom: 1px solid #2a2e3c;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+        .header h1 {
+            font-size: 18px;
+            font-weight: 300;
+            color: #b0b8c4;
+        }
+        .header h1 span {
+            color: #6a8a9a;
+        }
+        .toolbar {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        .btn {
+            padding: 6px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            font-family: inherit;
+            transition: 0.15s;
+        }
+        .btn-primary {
+            background: #2a5a8a;
+            color: #fff;
+        }
+        .btn-primary:hover {
+            background: #3a6a9a;
+        }
+        .btn-secondary {
+            background: #2a3a4a;
+            color: #8a9aaa;
+        }
+        .btn-secondary:hover {
+            background: #3a4a5a;
+        }
+        .btn-danger {
+            background: #4a2a2a;
+            color: #d08080;
+        }
+        .btn-danger:hover {
+            background: #5a3a3a;
+        }
+        .btn-example {
+            background: #2a6a4a;
+            color: #fff;
+        }
+        .btn-example:hover {
+            background: #3a7a5a;
+        }
+        #blocklyContainer {
+            flex: 1;
+            min-height: 0;
+            background: #141a26;
+        }
+        .json-panel {
+            background: #0e121c;
+            border-top: 1px solid #2a2e3c;
+            padding: 8px 16px;
+            max-height: 180px;
+            overflow: auto;
+            flex-shrink: 0;
+        }
+        .json-panel .label {
+            font-size: 10px;
+            color: #3a4a5a;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .json-panel code {
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            color: #6a8a8a;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .blocklyToolboxDiv {
+            background: #1a1e2c !important;
+        }
+        .blocklyTreeRow {
+            color: #e0e1dd !important;
+        }
+        .blocklyTreeRow:hover {
+            background: #2a2e3c !important;
+        }
+        #loading {
+            color: #778da9;
+            font-size: 14px;
+            text-align: center;
+            padding: 60px 20px;
+            user-select: none;
+        }
+    </style>
+    <script src="config.js"></script>
+</head>
+<body>
+
+<div class="header">
+    <h1>🧩 AutoSleep <span>逻辑编辑器</span></h1>
+    <div class="toolbar">
+        <button class="btn btn-example" id="loadExampleBtn">📂 加载示例</button>
+        <button class="btn btn-secondary" id="resetBtn">🗑️ 清空</button>
+        <button class="btn btn-primary" id="saveBtn">💾 保存 JSON</button>
+    </div>
+</div>
+
+<div id="statusBar" style="padding: 6px 20px; background: #0e121c; border-bottom: 1px solid #2a2e3c; font-size: 12px; color: #b0b8c4; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+    <span id="statusText">⏳ 加载配置...</span>
+    <span id="statusWarning" style="color: #d08080;"></span>
+</div>
+
+<div id="blocklyContainer">
+    <div id="loading">⏳ 正在加载 Blockly 编辑器...</div>
+</div>
+
+<div class="json-panel">
+    <div class="label">
+        <span>📋 生成的 JSON 结构</span>
+        <span id="nodeCount">0 个节点</span>
+    </div>
+    <code id="jsonContent">等待构建...</code>
+</div>
+
+<script>
+    window.addEventListener('beforeunload', function (e) {
+        fetch('/shutdown').catch(() => {});
+    });
+
+    // ---- 更新状态栏 ----
+    function updateStatusBar(config) {
+        const statusText = document.getElementById('statusText');
+        const statusWarning = document.getElementById('statusWarning');
+        if (!config) {
+            statusText.innerText = '⚠️ 无法获取配置';
+            return;
+        }
+
+        const parts = [];
+        parts.push(`CPU: ${config.CpuThreshold ?? 30}%`);
+        parts.push(`GPU: ${config.GpuThreshold ?? 30}%`);
+        parts.push(`网络: ${config.NetworkThresholdKBps ?? 1024} KB/s`);
+        parts.push(`磁盘: ${config.DiskThresholdKBps ?? 10240} KB/s`);
+        parts.push(`用户空闲: 3s`);
+        if (config.EnableTimeWindow) {
+            parts.push(`时间窗口: ${config.TimeWindowStart ?? 2}:00-${config.TimeWindowEnd ?? 7}:00`);
+        }
+
+        let statusMsg = `📊 阈值: ${parts.join(' | ')}`;
+        if (config.CustomLogicEnabled) {
+            statusMsg = '✅ 自定义逻辑已启用 · ' + statusMsg;
+            statusWarning.innerText = '';
+        } else {
+            statusMsg = '⏸️ 自定义逻辑未启用（需在设置中启用） · ' + statusMsg;
+            statusWarning.innerText = '⚠️ 当前未启用，编辑保存后需返回设置界面启用。';
+        }
+        statusText.innerText = statusMsg;
+    }
+
+    function initBlockly() {
+        if (typeof Blockly === 'undefined') {
+            document.getElementById('loading').textContent = '❌ Blockly 加载失败，请检查网络。';
+            document.getElementById('jsonContent').textContent = '❌ 加载失败。';
+            return;
+        }
+
+        document.getElementById('loading').textContent = '✅ 加载成功，正在初始化...';
+
+        // ---- 工具箱：固定显示全部 7 个条件 ----
+        const CONDITIONS = ['CPU', 'GPU', 'Disk', 'Network', 'User', 'Process', 'TimeWindow'];
+
+        // ---- 条件显示名称映射 ----
+        const CONDITION_DISPLAY = {
+            'CPU': 'CPU 使用率低于阈值',
+            'GPU': 'GPU 使用率低于阈值',
+            'Disk': '磁盘读写速度低于阈值',
+            'Network': '网络流量低于阈值',
+            'User': '用户无操作（超过3秒）',
+            'Process': '白名单进程未运行',
+            'TimeWindow': '当前在时间窗口内'
+        };
+
+        // ---------- 定义块 ----------
+        CONDITIONS.forEach(cond => {
+            Blockly.Blocks[`condition_${cond}`] = {
+                init: function() {
+                    this.appendDummyInput().appendField(CONDITION_DISPLAY[cond] || (cond + ' 低于阈值'));
+                    this.setOutput(true, 'Condition');
+                    this.setColour(120);
+                    this.setTooltip('判断 ' + cond + ' 条件是否满足');
+                }
+            };
+        });
+
+        const LOGIC_OPS = ['AND', 'OR', 'NOT'];
+        LOGIC_OPS.forEach(op => {
+            Blockly.Blocks[`logic_${op}`] = {
+                init: function() {
+                    if (op === 'NOT') {
+                        this.appendValueInput('A').setCheck('Condition').appendField('NOT');
+                    } else {
+                        this.appendValueInput('A').setCheck('Condition').appendField(op);
+                        this.appendValueInput('B').setCheck('Condition').appendField(op);
+                    }
+                    this.setOutput(true, 'Condition');
+                    this.setColour(30);
+                    this.setTooltip(op + ' 逻辑组合');
+                }
+            };
+        });
+
+        Blockly.Blocks['control_if'] = {
+            init: function() {
+                this.appendValueInput('CONDITION')
+                        .setCheck('Condition')
+                        .appendField('如果')
+                        .appendField(new Blockly.FieldLabel('条件', 'condition-label'));
+                this.appendStatementInput('THEN')
+                        .appendField('那么');
+                this.setPreviousStatement(true, null);
+                this.setNextStatement(true, null);
+                this.setColour(200);
+                this.setTooltip('条件分支开始');
+            }
+        };
+
+        Blockly.Blocks['control_elif'] = {
+            init: function() {
+                this.appendValueInput('CONDITION')
+                        .setCheck('Condition')
+                        .appendField('否则如果')
+                        .appendField(new Blockly.FieldLabel('条件', 'condition-label'));
+                this.appendStatementInput('THEN')
+                        .appendField('那么');
+                this.setPreviousStatement(true, null);
+                this.setNextStatement(true, null);
+                this.setColour(190);
+                this.setTooltip('否则如果分支');
+            }
+        };
+
+        Blockly.Blocks['control_else'] = {
+            init: function() {
+                this.appendStatementInput('THEN')
+                        .appendField('否则')
+                        .appendField(new Blockly.FieldLabel('执行', 'then-label'));
+                this.setPreviousStatement(true, null);
+                this.setNextStatement(true, null);
+                this.setColour(180);
+                this.setTooltip('否则分支');
+            }
+        };
+
+        const ACTIONS = ['sleep', 'continue_timer', 'reset_timer', 'nothing'];
+        const actionLabels = {
+            'sleep': '进入睡眠/休眠',
+            'continue_timer': '保持空闲计时（继续等待）',
+            'reset_timer': '重置空闲计时（重新等待）',
+            'nothing': '什么都不做'
+        };
+        ACTIONS.forEach(act => {
+            Blockly.Blocks[`action_${act}`] = {
+                init: function() {
+                    this.appendDummyInput().appendField(actionLabels[act] || act);
+                    this.setPreviousStatement(true, null);
+                    this.setNextStatement(true, null);
+                    this.setColour(80);
+                    this.setTooltip('执行 ' + actionLabels[act]);
+                }
+            };
+        });
+
+        Blockly.Blocks['program_root'] = {
+            init: function() {
+                this.appendStatementInput('ACTIONS')
+                        .appendField('AutoSleep 逻辑程序');
+                this.setColour(120);
+                this.setTooltip('程序根节点（只能有一个）');
+            }
+        };
+
+        // ---------- 生成器 ----------
+        function blockToJson(block) {
+            if (!block) return null;
+            const type = block.type;
+
+            if (type.startsWith('condition_')) {
+                const cond = type.replace('condition_', '');
+                return { type: 'condition', condition: cond };
+            }
+
+            if (type.startsWith('logic_')) {
+                const op = type.replace('logic_', '');
+                const a = blockToJson(block.getInputTargetBlock('A'));
+                if (op === 'NOT') {
+                    return { type: 'logic', operator: 'NOT', children: [a] };
+                } else {
+                    const b = blockToJson(block.getInputTargetBlock('B'));
+                    return { type: 'logic', operator: op, children: [a, b] };
+                }
+            }
+
+            if (type === 'control_if') {
+                const cond = blockToJson(block.getInputTargetBlock('CONDITION'));
+                const thenBlock = block.getInputTargetBlock('THEN');
+                const thenChildren = [];
+                let n = thenBlock;
+                while (n) {
+                    thenChildren.push(blockToJson(n));
+                    n = n.getNextBlock();
+                }
+                const thenValue = thenChildren.length === 1 ? thenChildren[0] : { type: 'sequence', actions: thenChildren };
+                return {
+                    type: 'control',
+                    control: 'if',
+                    condition: cond,
+                    then: thenValue
+                };
+            }
+
+            if (type === 'control_elif' || type === 'control_else') {
+                return { type: 'action', action: 'nothing', note: '单独的 ' + (type === 'control_elif' ? 'elif' : 'else') +
+                            '（无 if）' };
+            }
+
+            if (type.startsWith('action_')) {
+                const act = type.replace('action_', '');
+                return { type: 'action', action: act };
+            }
+
+            if (type === 'program_root') {
+                const actions = [];
+                let current = block.getInputTargetBlock('ACTIONS');
+                while (current) {
+                    if (current.type === 'control_if') {
+                        const ifJson = blockToJson(current);
+                        let elifList = [];
+                        let elseBlock = null;
+                        let nextNode = current.getNextBlock();
+                        while (nextNode) {
+                            if (nextNode.type === 'control_elif') {
+                                const elifCond = blockToJson(nextNode.getInputTargetBlock('CONDITION'));
+                                const elifThenBlock = nextNode.getInputTargetBlock('THEN');
+                                const elifThenChildren = [];
+                                let m = elifThenBlock;
+                                while (m) {
+                                    elifThenChildren.push(blockToJson(m));
+                                    m = m.getNextBlock();
+                                }
+                                const elifThenValue = elifThenChildren.length === 1 ? elifThenChildren[0] : { type: 'sequence',
+                                    actions: elifThenChildren };
+                                elifList.push({ condition: elifCond, then: elifThenValue });
+                                nextNode = nextNode.getNextBlock();
+                            } else if (nextNode.type === 'control_else') {
+                                const elseThenBlock = nextNode.getInputTargetBlock('THEN');
+                                const elseThenChildren = [];
+                                let m = elseThenBlock;
+                                while (m) {
+                                    elseThenChildren.push(blockToJson(m));
+                                    m = m.getNextBlock();
+                                }
+                                const elseThenValue = elseThenChildren.length === 1 ? elseThenChildren[0] : { type: 'sequence',
+                                    actions: elseThenChildren };
+                                elseBlock = elseThenValue;
+                                nextNode = nextNode.getNextBlock();
+                                break;
+                            } else {
+                                break;
+                            }
+                        }
+                        const completeIf = {
+                            type: 'control',
+                            control: 'if',
+                            condition: ifJson.condition,
+                            then: ifJson.then
+                        };
+                        if (elifList.length > 0) completeIf.elif = elifList;
+                        if (elseBlock) completeIf.else = elseBlock;
+                        actions.push(completeIf);
+                        current = nextNode;
+                    } else {
+                        const json = blockToJson(current);
+                        if (json) actions.push(json);
+                        current = current.getNextBlock();
+                    }
+                }
+                return { type: 'program', actions: actions };
+            }
+
+            return null;
+        }
+
+        // ---------- 初始化 Blockly ----------
+        const toolboxXml = `
+                <xml>
+                    <category name="条件" colour="120">
+                        ${CONDITIONS.map(c => `<block type="condition_${c}"></block>`).join('')}
+                    </category>
+                    <category name="逻辑" colour="30">
+                        <block type="logic_AND"></block>
+                        <block type="logic_OR"></block>
+                        <block type="logic_NOT"></block>
+                    </category>
+                    <category name="控制" colour="200">
+                        <block type="control_if"></block>
+                        <block type="control_elif"></block>
+                        <block type="control_else"></block>
+                    </category>
+                    <category name="动作" colour="80">
+                        <block type="action_sleep"></block>
+                        <block type="action_continue_timer"></block>
+                        <block type="action_reset_timer"></block>
+                        <block type="action_nothing"></block>
+                    </category>
+                    <category name="程序" colour="120">
+                        <block type="program_root" maxCount="1"></block>
+                    </category>
+                </xml>
+            `;
+
+        const workspace = Blockly.inject('blocklyContainer', {
+            toolbox: toolboxXml,
+            collapse: false,
+            comments: false,
+            disable: false,
+            maxBlocks: Infinity,
+            trashcan: true,
+            horizontalLayout: false,
+            toolboxPosition: 'start',
+            css: true,
+            media: 'https://cdn.jsdelivr.net/npm/blockly@13.1.1/media/',
+            renderer: 'zelos',
+            zoom: { controls: true, wheel: true, startScale: 0.9, maxScale: 2, minScale: 0.5, scaleSpeed: 1.1 }
+        });
+
+        // 限制 program_root 只能有一个
+        workspace.addChangeListener(function(event) {
+            if (event.type === Blockly.Events.BLOCK_CREATE) {
+                const block = workspace.getBlockById(event.blockId);
+                if (block && block.type === 'program_root') {
+                    const roots = workspace.getTopBlocks(true).filter(b => b.type === 'program_root');
+                    if (roots.length > 1) {
+                        block.dispose();
+                        alert('⚠️ 只能有一个 "程序" 块！');
+                    }
+                }
+            }
+        });
+
+        // ---------- 实时预览 ----------
+        function updatePreview() {
+            const rootBlocks = workspace.getTopBlocks(true);
+            let root = null;
+            for (const b of rootBlocks) {
+                if (b.type === 'program_root') {
+                    root = b;
+                    break;
+                }
+            }
+            if (!root) {
+                document.getElementById('jsonContent').textContent = '请拖入 "程序" 块，然后在其中构建逻辑。';
+                document.getElementById('nodeCount').textContent = '0 个节点';
+                return;
+            }
+
+            try {
+                const json = blockToJson(root);
+                if (json) {
+                    document.getElementById('jsonContent').textContent = JSON.stringify(json, null, 2);
+                    document.getElementById('nodeCount').textContent = countNodes(json) + ' 个节点';
+                } else {
+                    document.getElementById('jsonContent').textContent = '解析失败，请检查块结构。';
+                }
+            } catch (e) {
+                document.getElementById('jsonContent').textContent = '解析错误：' + e.message;
+            }
+        }
+
+        function countNodes(node) {
+            if (!node) return 0;
+            let c = 1;
+            if (node.type === 'logic' && node.children) {
+                node.children.forEach(child => c += countNodes(child));
+            }
+            if (node.type === 'control') {
+                ['condition', 'then'].forEach(slot => {
+                    if (node[slot]) c += countNodes(node[slot]);
+                });
+                if (node.elif && Array.isArray(node.elif)) {
+                    node.elif.forEach(e => {
+                        if (e.condition) c += countNodes(e.condition);
+                        if (e.then) c += countNodes(e.then);
+                    });
+                }
+                if (node.else) c += countNodes(node.else);
+            }
+            if (node.type === 'program' && node.actions) {
+                node.actions.forEach(a => c += countNodes(a));
+            }
+            if (node.type === 'sequence' && node.actions) {
+                node.actions.forEach(a => c += countNodes(a));
+            }
+            return c;
+        }
+
+        workspace.addChangeListener(updatePreview);
+
+        // ---------- 按钮事件 ----------
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            if (confirm('确定清空所有块吗？')) {
+                workspace.clear();
+                updatePreview();
+            }
+        });
+
+        document.getElementById('saveBtn').addEventListener('click', () => {
+            const content = document.getElementById('jsonContent').textContent;
+            if (content.startsWith('请拖入') || content.startsWith('解析失败') || content.startsWith('解析错误')) {
+                alert('还没有有效的逻辑配置。');
+                return;
+            }
+
+            fetch('/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: content,
+            })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            alert('✅ 自定义逻辑已保存并启用。');
+                        } else {
+                            alert('❌ 保存失败：' + (data.message || '未知错误'));
+                        }
+                    })
+                    .catch(error => {
+                        alert('❌ 无法连接到本地服务，请确认 Settings 已启动。');
+                        console.error('Error:', error);
+                    });
+        });
+
+        // ---------- 加载示例 ----------
+        function loadExample() {
+            workspace.clear();
+
+            const programBlock = workspace.newBlock('program_root');
+            programBlock.initSvg();
+            programBlock.render();
+
+            const ifBlock = workspace.newBlock('control_if');
+            ifBlock.initSvg();
+            ifBlock.render();
+            ifBlock.setPreviousStatement(true);
+            programBlock.getInput('ACTIONS').connection.connect(ifBlock.previousConnection);
+
+            const cpuBlock = workspace.newBlock('condition_CPU');
+            cpuBlock.initSvg();
+            cpuBlock.render();
+            ifBlock.getInput('CONDITION').connection.connect(cpuBlock.outputConnection);
+
+            const sleepBlock = workspace.newBlock('action_sleep');
+            sleepBlock.initSvg();
+            sleepBlock.render();
+            sleepBlock.setPreviousStatement(true);
+            ifBlock.getInput('THEN').connection.connect(sleepBlock.previousConnection);
+
+            const elifBlock = workspace.newBlock('control_elif');
+            elifBlock.initSvg();
+            elifBlock.render();
+            elifBlock.setPreviousStatement(true);
+            ifBlock.setNextStatement(true);
+            ifBlock.nextConnection.connect(elifBlock.previousConnection);
+
+            const networkBlock = workspace.newBlock('condition_Network');
+            networkBlock.initSvg();
+            networkBlock.render();
+            elifBlock.getInput('CONDITION').connection.connect(networkBlock.outputConnection);
+
+            const continueBlock = workspace.newBlock('action_continue_timer');
+            continueBlock.initSvg();
+            continueBlock.render();
+            continueBlock.setPreviousStatement(true);
+            elifBlock.getInput('THEN').connection.connect(continueBlock.previousConnection);
+
+            const elseBlock = workspace.newBlock('control_else');
+            elseBlock.initSvg();
+            elseBlock.render();
+            elseBlock.setPreviousStatement(true);
+            elifBlock.setNextStatement(true);
+            elifBlock.nextConnection.connect(elseBlock.previousConnection);
+
+            const resetBlock = workspace.newBlock('action_reset_timer');
+            resetBlock.initSvg();
+            resetBlock.render();
+            resetBlock.setPreviousStatement(true);
+            elseBlock.getInput('THEN').connection.connect(resetBlock.previousConnection);
+
+            programBlock.moveBy(20, 20);
+            updatePreview();
+        }
+
+        // ---------- 加载现有树（从 JSON 恢复工作区） ----------
+        function loadExistingTree(json) {
+            workspace.clear();
+
+            function jsonToBlocks(jsonData) {
+                if (!jsonData) return null;
+
+                if (jsonData.type === 'program') {
+                    const rootBlock = workspace.newBlock('program_root');
+                    rootBlock.initSvg();
+                    rootBlock.render();
+                    let prevBlock = null;
+                    for (const action of jsonData.actions) {
+                        const block = jsonToBlocks(action);
+                        if (block) {
+                            if (prevBlock) {
+                                prevBlock.setNextStatement(true);
+                                prevBlock.nextConnection.connect(block.previousConnection);
+                            } else {
+                                rootBlock.getInput('ACTIONS').connection.connect(block.previousConnection);
+                            }
+                            prevBlock = block;
+                        }
+                    }
+                    rootBlock.moveBy(20, 20);
+                    return rootBlock;
+                }
+
+                if (jsonData.type === 'control' && jsonData.control === 'if') {
+                    const ifBlock = workspace.newBlock('control_if');
+                    ifBlock.initSvg();
+                    ifBlock.render();
+
+                    const condBlock = jsonToBlocks(jsonData.condition);
+                    if (condBlock) {
+                        ifBlock.getInput('CONDITION').connection.connect(condBlock.outputConnection);
+                    }
+
+                    const thenBlock = jsonToBlocks(jsonData.then);
+                    if (thenBlock) {
+                        ifBlock.getInput('THEN').connection.connect(thenBlock.previousConnection);
+                    }
+
+                    let prevBranch = ifBlock;
+                    if (jsonData.elif && jsonData.elif.length > 0) {
+                        for (const elifData of jsonData.elif) {
+                            const elifBlock = workspace.newBlock('control_elif');
+                            elifBlock.initSvg();
+                            elifBlock.render();
+                            elifBlock.setPreviousStatement(true);
+                            prevBranch.setNextStatement(true);
+                            prevBranch.nextConnection.connect(elifBlock.previousConnection);
+
+                            const elifCondBlock = jsonToBlocks(elifData.condition);
+                            if (elifCondBlock) {
+                                elifBlock.getInput('CONDITION').connection.connect(elifCondBlock.outputConnection);
+                            }
+                            const elifThenBlock = jsonToBlocks(elifData.then);
+                            if (elifThenBlock) {
+                                elifBlock.getInput('THEN').connection.connect(elifThenBlock.previousConnection);
+                            }
+                            prevBranch = elifBlock;
+                        }
+                    }
+
+                    if (jsonData.else) {
+                        const elseBlock = workspace.newBlock('control_else');
+                        elseBlock.initSvg();
+                        elseBlock.render();
+                        elseBlock.setPreviousStatement(true);
+                        prevBranch.setNextStatement(true);
+                        prevBranch.nextConnection.connect(elseBlock.previousConnection);
+
+                        const elseThenBlock = jsonToBlocks(jsonData.else);
+                        if (elseThenBlock) {
+                            elseBlock.getInput('THEN').connection.connect(elseThenBlock.previousConnection);
+                        }
+                    }
+
+                    return ifBlock;
+                }
+
+                if (jsonData.type === 'condition') {
+                    const cond = jsonData.condition;
+                    const block = workspace.newBlock(`condition_${cond}`);
+                    block.initSvg();
+                    block.render();
+                    return block;
+                }
+
+                if (jsonData.type === 'action') {
+                    const action = jsonData.action;
+                    const block = workspace.newBlock(`action_${action}`);
+                    block.initSvg();
+                    block.render();
+                    return block;
+                }
+
+                if (jsonData.type === 'sequence') {
+                    let prevBlock = null;
+                    for (const action of jsonData.actions) {
+                        const block = jsonToBlocks(action);
+                        if (block) {
+                            if (prevBlock) {
+                                prevBlock.setNextStatement(true);
+                                prevBlock.nextConnection.connect(block.previousConnection);
+                            }
+                            prevBlock = block;
+                        }
+                    }
+                    return prevBlock;
+                }
+
+                if (jsonData.type === 'logic') {
+                    const op = jsonData.operator;
+                    const block = workspace.newBlock(`logic_${op}`);
+                    block.initSvg();
+                    block.render();
+                    const children = jsonData.children || [];
+                    if (children.length > 0) {
+                        const childBlock = jsonToBlocks(children[0]);
+                        if (childBlock) {
+                            block.getInput('A').connection.connect(childBlock.outputConnection);
+                        }
+                    }
+                    if (children.length > 1 && op !== 'NOT') {
+                        const childBlock2 = jsonToBlocks(children[1]);
+                        if (childBlock2) {
+                            block.getInput('B').connection.connect(childBlock2.outputConnection);
+                        }
+                    }
+                    return block;
+                }
+
+                return null;
+            }
+
+            try {
+                jsonToBlocks(json);
+                updatePreview();
+                document.getElementById('loading').textContent = '✅ 已加载现有逻辑树。';
+            } catch (e) {
+                console.error('加载现有树失败:', e);
+                setTimeout(loadExample, 300);
+            }
+        }
+
+        // ---------- 加载逻辑：先尝试从配置加载现有树，没有则加载示例 ----------
+        function loadExistingOrExample() {
+            console.log('loadExistingOrExample called');
+            fetch('/config.js')
+                    .then(response => response.text())
+                    .then(text => {
+                        const match = text.match(/window\.__AUTOSLEEP_CONFIG\s*=\s*({.*?});/s);
+                        if (match) {
+                            try {
+                                const config = eval('(' + match[1] + ')');
+                                console.log('config loaded:', config);
+                                updateStatusBar(config);
+                                if (config.CustomLogicTree && config.CustomLogicTree.type === 'program') {
+                                    console.log('Loading existing tree...');
+                                    loadExistingTree(config.CustomLogicTree);
+                                    return;
+                                } else {
+                                    console.log('No CustomLogicTree found, loading example');
+                                }
+                            } catch (e) {
+                                console.error('Parse error:', e);
+                            }
+                        }
+                        setTimeout(loadExample, 300);
+                    })
+                    .catch(err => {
+                        console.error('fetch error:', err);
+                        document.getElementById('statusText').innerText = '❌ 无法连接服务器';
+                        setTimeout(loadExample, 300);
+                    });
+        }
+
+        document.getElementById('loadExampleBtn').addEventListener('click', loadExample);
+        loadExistingOrExample();
+        document.getElementById('loading').textContent = '⏳ 正在加载...';
+        console.log('Blockly 编辑器已加载。');
+    }
+
+    // 初始化
+    if (typeof Blockly !== 'undefined') {
+        initBlockly();
+    } else {
+        var checkInterval = setInterval(function() {
+            if (typeof Blockly !== 'undefined') {
+                clearInterval(checkInterval);
+                initBlockly();
+            }
+        }, 300);
+        setTimeout(function() {
+            clearInterval(checkInterval);
+            if (typeof Blockly === 'undefined') {
+                document.getElementById('loading').textContent = '❌ Blockly 加载超时，请检查网络。';
+            }
+        }, 10000);
+    }
+</script>
+
+</body>
+</html>

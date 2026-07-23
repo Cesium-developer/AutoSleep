@@ -424,20 +424,39 @@ Set-Content -Path $uninstallScriptPath -Value $uninstallContent -Encoding UTF8
 Write-Log "✅ 已生成备用卸载脚本 $uninstallScriptPath" -Color "Green"
 
 # ---- 注册到 Windows 已安装应用列表 ----
-$regPath = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\AutoSleep"
-if (Test-Path $regPath) {
-    Remove-Item -Path $regPath -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Log "已清理旧注册表项" -Color "Cyan"
+Write-Log "正在注册到 Windows 已安装应用列表..." -Color "Cyan"
+$regPath = "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+try {
+    # 打开 64 位注册表视图
+    $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
+    $uninstallKey = $baseKey.OpenSubKey($regPath, $true)
+    if ($null -eq $uninstallKey) {
+        throw "无法打开注册表路径 $regPath"
+    }
+
+    # 如果旧子项存在，删除
+    if ($uninstallKey.GetSubKeyNames() -contains "AutoSleep") {
+        $uninstallKey.DeleteSubKeyTree("AutoSleep")
+        Write-Log "已清理旧注册表项" -Color "Cyan"
+    }
+
+    # 创建新子项
+    $subKey = $uninstallKey.CreateSubKey("AutoSleep")
+    $subKey.SetValue("DisplayName", "AutoSleep 智能休眠工具")
+    $subKey.SetValue("DisplayVersion", "1.0.9")
+    $subKey.SetValue("Publisher", "Cesium-developer")
+    $subKey.SetValue("InstallLocation", "C:\ProgramData\AutoSleep")
+    $subKey.SetValue("UninstallString", "C:\ProgramData\AutoSleep\Uninstall.exe")
+    $subKey.SetValue("NoModify", 1, [Microsoft.Win32.RegistryValueKind]::DWord)
+    $subKey.SetValue("NoRepair", 1, [Microsoft.Win32.RegistryValueKind]::DWord)
+    $subKey.Close()
+    $uninstallKey.Close()
+    $baseKey.Close()
+
+    Write-Log "✅ 已注册到 Windows 已安装应用列表（64 位视图）" -Color "Green"
+} catch {
+    Write-Log "❌ 注册表写入失败：$_" -Color "Red"
 }
-New-Item -Path $regPath -Force | Out-Null
-Set-ItemProperty -Path $regPath -Name "DisplayName" -Value "AutoSleep 智能休眠工具"
-Set-ItemProperty -Path $regPath -Name "DisplayVersion" -Value "1.0.7"
-Set-ItemProperty -Path $regPath -Name "Publisher" -Value "Cesium-developer"
-Set-ItemProperty -Path $regPath -Name "InstallLocation" -Value $targetDir
-Set-ItemProperty -Path $regPath -Name "UninstallString" -Value "$targetDir\Uninstall.exe"
-Set-ItemProperty -Path $regPath -Name "NoModify" -Value 1
-Set-ItemProperty -Path $regPath -Name "NoRepair" -Value 1
-Write-Log "✅ 已注册到 Windows 已安装应用列表（卸载程序：Uninstall.exe）" -Color "Green"
 
 # ---- 阶段3：验证部署 ----
 Write-Log "----- 阶段3：验证部署 -----" -Color "Cyan"

@@ -708,4 +708,125 @@ $form.Controls.Add($lblHibernateHint)
 
 Refresh-HibernateUI
 
+# ---- 按钮行3 ----
+$top += $rowHeight + 80
+
+# --- 检查更新 ---
+$btnUpdate = New-Object System.Windows.Forms.Button
+$btnUpdate.Text = "检查更新"
+$btnUpdate.Location = New-Point 20 $top
+$btnUpdate.Size = New-Object System.Drawing.Size(80, 30)
+$btnUpdate.Add_Click({
+    # 1. 读取当前版本（从注册表）
+    try {
+        $currentVersion = (Get-ItemProperty -Path "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\AutoSleep" -ErrorAction Stop).DisplayVersion
+    } catch {
+        $currentVersion = "0.0.0"
+    }
+
+    # 2. 镜像源列表（依次尝试）
+    $mirrors = @(
+        "https://api.github.com/repos/Cesium-developer/AutoSleep/releases/latest",
+        "https://ghproxy.net/https://api.github.com/repos/Cesium-developer/AutoSleep/releases/latest"
+    )
+
+    $releaseInfo = $null
+    foreach ($url in $mirrors) {
+        try {
+            $releaseInfo = Invoke-RestMethod -Uri $url -TimeoutSec 5 -ErrorAction Stop
+            break
+        } catch {
+            continue
+        }
+    }
+
+    if (-not $releaseInfo) {
+        [System.Windows.Forms.MessageBox]::Show(
+                "无法连接服务器，请检查网络后重试。",
+                "错误",
+                "OK",
+                "Error"
+        )
+        return
+    }
+
+    # 3. 版本比较（使用 [Version] 避免字符串比较的边界问题）
+    $latestVersion = $releaseInfo.tag_name -replace '^v', ''
+    try {
+        $latestVer = [Version]$latestVersion
+        $currentVer = [Version]$currentVersion
+        if ($latestVer -le $currentVer) {
+            [System.Windows.Forms.MessageBox]::Show(
+                    "已是最新版本（当前 v$currentVersion）。",
+                    "提示",
+                    "OK",
+                    "Information"
+            )
+            return
+        }
+    } catch {
+        # 如果版本号格式异常，降级到字符串比较
+        if ($latestVersion -eq $currentVersion) {
+            [System.Windows.Forms.MessageBox]::Show(
+                    "已是最新版本（当前 v$currentVersion）。",
+                    "提示",
+                    "OK",
+                    "Information"
+            )
+            return
+        }
+    }
+
+    # 4. 用户确认
+    $result = [System.Windows.Forms.MessageBox]::Show(
+            "发现新版本 v$latestVersion（当前 v$currentVersion）。`n`n是否下载并安装？",
+            "更新可用",
+            "YesNo",
+            "Question"
+    )
+    if ($result -ne "Yes") { return }
+
+    # 5. 查找安装包下载地址
+    $asset = $releaseInfo.assets | Where-Object { $_.name -like "*AutoSleep_Setup.exe" } | Select-Object -First 1
+    if (-not $asset) {
+        [System.Windows.Forms.MessageBox]::Show(
+                "未找到 AutoSleep_Setup.exe 安装包，请手动从 GitHub Releases 下载。",
+                "错误",
+                "OK",
+                "Error"
+        )
+        return
+    }
+
+    # 6. 下载安装包到 %TEMP%
+    $tempInstaller = "$env:TEMP\AutoSleep_Setup.exe"
+    try {
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tempInstaller -TimeoutSec 30 -ErrorAction Stop
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show(
+                "下载失败：`n`n$($_.Exception.Message)",
+                "错误",
+                "OK",
+                "Error"
+        )
+        return
+    }
+
+    # 7. 运行安装包（等待安装完成）
+    Start-Process -FilePath $tempInstaller -Wait
+
+    # 8. 清理临时文件
+    Remove-Item $tempInstaller -Force -ErrorAction SilentlyContinue
+
+    # 9. 提示并关闭设置窗口
+    [System.Windows.Forms.MessageBox]::Show(
+            "更新安装完成。",
+            "提示",
+            "OK",
+            "Information"
+    )
+    $form.Close()
+})
+$form.Controls.Add($btnUpdate)
+
 $form.ShowDialog()
