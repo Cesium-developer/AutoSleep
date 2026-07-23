@@ -6,12 +6,12 @@
 
 <!-- 微信卡片抓取标签（Open Graph） -->
 <meta property="og:title" content="IdleNap：让电脑自己乖乖睡觉" />
-<meta property="og:description" content="基于 CPU/GPU/磁盘/网络/用户输入/进程白名单的多维度检测，条件满足时自动触发睡眠。" />
+<meta property="og:description" content="多维度空闲检测 + 图形化自定义规则引擎，条件满足时自动触发睡眠/休眠。支持 AND/OR/NOT 逻辑组合、进程白名单、时间窗口。完全本地运行，不联网。" />
 <meta property="og:image" content="https://cesium-developer.github.io/IdleNap/images/settings.png" />
 <meta property="og:url" content="https://cesium-developer.github.io/IdleNap/" />
 <meta property="og:type" content="website" />
 
-<title>IDLENAP</title>
+<title>IdleNap</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -190,6 +190,12 @@
     <div class="step-num">STEP 03</div>
     <h3>✅ 运行</h3>
     <p>安装完成后，程序在后台运行，根据上述条件自动判断是否触发睡眠。</p>
+  </div>
+
+  <div class="step">
+    <div class="step-num">STEP 04 — 高级玩法</div>
+    <h3>🧩 自定义规则</h3>
+    <p>内置 Blockly 图形化编程，支持 AND / OR / NOT 逻辑组合、<code>if/elif/else</code> 条件分支、自定义触发动作。不写代码，拖拽就能定义"什么时候该睡"。</p>
   </div>
 
   <a class="dl-btn" href="https://github.com/Cesium-developer/IdleNap/releases">
