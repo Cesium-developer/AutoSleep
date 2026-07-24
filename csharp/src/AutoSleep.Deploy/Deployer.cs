@@ -138,8 +138,7 @@ namespace AutoSleep.Deploy
             string sourceDir = Path.GetDirectoryName(Process.GetCurrentProcess().MainModule.FileName);
             string[] filesToCopy = {
                 "AutoSleep.exe", "AutoSleepSettings.exe", "AutoSleepServer.exe",
-                "Uninstall.exe", "README.txt", "editor.html",
-                "curl.exe"
+                "Uninstall.exe", "README.txt", "editor.html"
             };
             foreach (string file in filesToCopy)
             {
@@ -154,6 +153,26 @@ namespace AutoSleep.Deploy
                 {
                     WriteLog("未找到: " + file + "，跳过");
                 }
+            }
+
+            // Win7 需要 curl.exe（自带 TLS 栈，不走 Schannel），Win10+ 不需要
+            if (IsWindows7())
+            {
+                string curlSrc = Path.Combine(sourceDir, "curl.exe");
+                string curlDst = Path.Combine(InstallDir, "curl.exe");
+                if (File.Exists(curlSrc))
+                {
+                    File.Copy(curlSrc, curlDst, true);
+                    WriteLog("已复制: curl.exe（Win7 专用）");
+                }
+                else
+                {
+                    WriteLog("未找到: curl.exe，跳过（Win7 检查更新将不可用）");
+                }
+            }
+            else
+            {
+                WriteLog("跳过 curl.exe（非 Win7 系统，不需要）");
             }
 
             // ---- 休眠检测与配置 ----
@@ -356,7 +375,7 @@ namespace AutoSleep.Deploy
                     if (key != null)
                     {
                         key.SetValue("DisplayName", "AutoSleep 智能休眠工具");
-                        key.SetValue("DisplayVersion", "1.0.9");
+                        key.SetValue("DisplayVersion", "1.0.8");
                         key.SetValue("Publisher", "Cesium-developer");
                         key.SetValue("InstallLocation", InstallDir);
                         key.SetValue("DisplayIcon", Path.Combine(InstallDir, "AutoSleepSettings.exe"));
@@ -443,6 +462,22 @@ namespace AutoSleep.Deploy
             }
             catch { }
             return 8;
+        }
+
+        static bool IsWindows7()
+        {
+            try
+            {
+                using (var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
+                {
+                    if (key == null) return false;
+                    var majorVer = key.GetValue("CurrentMajorVersionNumber");
+                    if (majorVer != null) return false;
+                    var name = key.GetValue("ProductName") as string;
+                    return name != null && name.IndexOf("Windows 7", StringComparison.OrdinalIgnoreCase) >= 0;
+                }
+            }
+            catch { return false; }
         }
 
         static void WriteLog(string msg)
