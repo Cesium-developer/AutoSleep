@@ -442,13 +442,26 @@ namespace AutoSleep.Settings
             if (string.IsNullOrEmpty(downloadUrl)) { downloadUrl = TryFindRegularInstaller(releaseJson); }
             if (string.IsNullOrEmpty(downloadUrl)) { MessageBox.Show("未找到 C# 版安装包，请手动从 GitHub Releases 下载。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
             string tempInstaller = Path.Combine(Path.GetTempPath(), "AutoSleep_Setup_Win7_Net40.exe");
+            string[] downloadUrls = new string[] {
+                downloadUrl,
+                "https://ghproxy.net/" + downloadUrl
+            };
             bool downloadOk = false;
             string downloadError = null;
             if (isWin7)
-                downloadOk = DownloadWithCurl(downloadUrl, tempInstaller, out downloadError);
+            {
+                foreach (string url in downloadUrls)
+                {
+                    downloadOk = DownloadWithCurl(url, tempInstaller, out downloadError);
+                    if (downloadOk) break;
+                }
+            }
             else
             {
-                try { using (var wc = new WebClient()) { wc.Headers.Add("User-Agent", "AutoSleep"); wc.DownloadFile(downloadUrl, tempInstaller); } downloadOk = true; } catch (Exception ex) { downloadError = ex.Message; }
+                foreach (string url in downloadUrls)
+                {
+                    try { using (var wc = new WebClient()) { wc.Headers.Add("User-Agent", "AutoSleep"); wc.DownloadFile(url, tempInstaller); } downloadOk = true; break; } catch (Exception ex) { downloadError = ex.Message; }
+                }
             }
             if (!downloadOk) { MessageBox.Show("下载失败：\n\n" + downloadError, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
             var p = Process.Start(tempInstaller); if (p != null) p.WaitForExit();
