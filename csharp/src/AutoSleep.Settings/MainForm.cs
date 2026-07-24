@@ -332,20 +332,92 @@ namespace AutoSleep.Settings
 
         private void RunScheduledTask(string taskName) { try { var p = Process.Start("schtasks.exe", "/run /tn \"" + taskName + "\""); if (p != null) p.WaitForExit(); } catch { } try { if (Process.GetProcessesByName("AutoSleep").Length == 0) Process.Start(Path.Combine(InstallDir, "AutoSleep.exe")); } catch { } }
 
+        private static bool IsWindows7()
+        {
+            try
+            {
+                var reg = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
+                if (reg == null) return false;
+                // Win10+ 有 CurrentMajorVersionNumber，Win7 没有
+                var majorVer = reg.GetValue("CurrentMajorVersionNumber");
+                if (majorVer != null) return false;
+                var name = reg.GetValue("ProductName") as string;
+                return name != null && name.IndexOf("Windows 7", StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+            catch { return false; }
+        }
+
+        private string FetchApiWithCurl(string url)
+        {
+            string curlPath = Path.Combine(InstallDir, "curl.exe");
+            if (!File.Exists(curlPath)) return null;
+            try
+            {
+                var psi = new ProcessStartInfo(curlPath, "-s --connect-timeout 10 -H \"User-Agent: AutoSleep\" \"" + url + "\"")
+                {
+                    UseShellExecute = false, CreateNoWindow = true,
+                    RedirectStandardOutput = true, RedirectStandardError = true
+                };
+                using (var p = Process.Start(psi))
+                {
+                    if (p == null) return null;
+                    string output = p.StandardOutput.ReadToEnd();
+                    p.WaitForExit(15000);
+                    return p.ExitCode == 0 && !string.IsNullOrEmpty(output) ? output : null;
+                }
+            }
+            catch { return null; }
+        }
+
+        private bool DownloadWithCurl(string url, string outputPath)
+        {
+            string curlPath = Path.Combine(InstallDir, "curl.exe");
+            if (!File.Exists(curlPath)) return false;
+            try
+            {
+                var psi = new ProcessStartInfo(curlPath, "-sL --connect-timeout 15 --max-time 120 -o \"" + outputPath + "\" \"" + url + "\"")
+                {
+                    UseShellExecute = false, CreateNoWindow = true
+                };
+                using (var p = Process.Start(psi))
+                {
+                    if (p == null) return false;
+                    p.WaitForExit(120000);
+                    return p.ExitCode == 0 && File.Exists(outputPath) && new FileInfo(outputPath).Length > 0;
+                }
+            }
+            catch { return false; }
+        }
+
         private void CheckUpdate()
         {
-            // Win7 可能不支持 TLS 1.2（需要 KB3140245）
-            try { System.Net.ServicePointManager.SecurityProtocol = (System.Net.SecurityProtocolType)3072; } catch { }
+            bool isWin7 = IsWindows7();
 
             string currentVersion = "0.0.0";
             try { currentVersion = GetRegistryString(RegUninstallPath, "DisplayVersion", "0.0.0"); } catch { }
             string[] mirrors = new string[] { "https://api.github.com/repos/Cesium-developer/IdleNap/releases/latest", "https://ghproxy.net/https://api.github.com/repos/Cesium-developer/IdleNap/releases/latest" };
             string latestVersion = null, releaseJson = null;
-            foreach (string url in mirrors)
+
+            if (isWin7)
             {
-                try { var req = (HttpWebRequest)WebRequest.Create(url); req.Timeout = 5000; req.UserAgent = "AutoSleep"; req.Accept = "application/json"; using (var resp = req.GetResponse()) using (var reader = new StreamReader(resp.GetResponseStream())) { releaseJson = reader.ReadToEnd(); break; } }
-                catch { continue; }
+                // Win7：curl 自带 LibreSSL TLS 栈，不走 Schannel
+                foreach (string url in mirrors)
+                {
+                    releaseJson = FetchApiWithCurl(url);
+                    if (releaseJson != null) break;
+                }
             }
+            else
+            {
+                // Win10+：正常用 HttpWebRequest
+                try { System.Net.ServicePointManager.SecurityProtocol = (System.Net.SecurityProtocolType)3072; } catch { }
+                foreach (string url in mirrors)
+                {
+                    try { var req = (HttpWebRequest)WebRequest.Create(url); req.Timeout = 5000; req.UserAgent = "AutoSleep"; req.Accept = "application/json"; using (var resp = req.GetResponse()) using (var reader = new StreamReader(resp.GetResponseStream())) { releaseJson = reader.ReadToEnd(); break; } }
+                    catch { continue; }
+                }
+            }
+
             if (releaseJson == null) { MessageBox.Show("无法连接服务器，请检查网络后重试。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
             try { var serializer = new System.Web.Script.Serialization.JavaScriptSerializer(); var data = serializer.Deserialize<Dictionary<string, object>>(releaseJson); string tag = (data != null && data.ContainsKey("tag_name") && data["tag_name"] != null) ? data["tag_name"].ToString() : ""; latestVersion = tag == null ? null : tag.TrimStart('v'); } catch { }
             if (string.IsNullOrEmpty(latestVersion)) { MessageBox.Show("无法获取最新版本信息。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
@@ -355,7 +427,14 @@ namespace AutoSleep.Settings
             try { var serializer = new System.Web.Script.Serialization.JavaScriptSerializer(); var data = serializer.Deserialize<Dictionary<string, object>>(releaseJson); var assets = data != null ? data["assets"] as List<object> : null; if (assets != null) { foreach (var a in assets) { var asset = a as Dictionary<string, object>; string name = (asset != null && asset.ContainsKey("name") && asset["name"] != null) ? asset["name"].ToString() : ""; if (name != null && name.IndexOf("AutoSleep_Setup_Win7", StringComparison.OrdinalIgnoreCase) >= 0) { downloadUrl = (asset != null && asset.ContainsKey("browser_download_url") && asset["browser_download_url"] != null) ? asset["browser_download_url"].ToString() : null; break; } } } } catch { }
             if (string.IsNullOrEmpty(downloadUrl)) { MessageBox.Show("未找到 C# 版安装包，请手动从 GitHub Releases 下载。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
             string tempInstaller = Path.Combine(Path.GetTempPath(), "AutoSleep_Setup_Win7_Net40.exe");
-            try { using (var wc = new WebClient()) wc.DownloadFile(downloadUrl, tempInstaller); } catch (Exception ex) { MessageBox.Show(string.Format("下载失败：\n\n{0}", ex.Message), "错误", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+            bool downloadOk = false;
+            if (isWin7)
+                downloadOk = DownloadWithCurl(downloadUrl, tempInstaller);
+            else
+            {
+                try { using (var wc = new WebClient()) wc.DownloadFile(downloadUrl, tempInstaller); downloadOk = true; } catch { }
+            }
+            if (!downloadOk) { MessageBox.Show("下载失败，请检查网络后重试。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
             var p = Process.Start(tempInstaller); if (p != null) p.WaitForExit();
             try { File.Delete(tempInstaller); } catch { }
             MessageBox.Show("更新安装完成。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
