@@ -290,7 +290,7 @@ namespace AutoSleep.Settings
         private string GetConfigStr(string key) { if (_config.ContainsKey(key) && _config[key] != null) return _config[key].ToString(); return ""; }
         private int GetConfigInt(string key) { try { return Convert.ToInt32(_config.ContainsKey(key) ? _config[key] : 0); } catch { return 0; } }
         private bool GetConfigBool(string key) { try { return _config.ContainsKey(key) && Convert.ToBoolean(_config[key]); } catch { return false; } }
-        private List<string> GetConfigList(string key) { if (!_config.ContainsKey(key)) return new List<string>(); var list = _config[key] as List<object>; if (list == null) return new List<string>(); return list.ConvertAll(x => x == null ? "" : x.ToString()); }
+        private List<string> GetConfigList(string key) { if (!_config.ContainsKey(key)) return new List<string>(); var raw = _config[key] as System.Collections.ArrayList; if (raw == null) return new List<string>(); var result = new List<string>(); foreach (var x in raw) result.Add(x == null ? "" : x.ToString()); return result; }
         private string GetRegistryString(string regPath, string valueName, string defaultValue) { try { object val = Registry.GetValue(regPath, valueName, defaultValue); if (val != null) return val.ToString(); return defaultValue; } catch { return defaultValue; } }
         private bool GetHibernateStatus() { try { object val = Registry.GetValue(@"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Power", "HibernateEnabled", 0); return val != null && Convert.ToInt32(val) == 1; } catch { return false; } }
 
