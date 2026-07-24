@@ -798,13 +798,23 @@ $btnUpdate.Add_Click({
         return
     }
 
-    # 6. 下载安装包到 %TEMP%
+    # 6. 下载安装包到 %TEMP%（直连失败自动换 ghproxy 镜像）
     $tempInstaller = "$env:TEMP\AutoSleep_Setup.exe"
-    try {
-        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tempInstaller -TimeoutSec 30 -ErrorAction Stop
-    } catch {
+    $downloadUrls = @($asset.browser_download_url, "https://ghproxy.net/$($asset.browser_download_url)")
+    $downloaded = $false
+    $downloadError = ""
+    foreach ($url in $downloadUrls) {
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $tempInstaller -TimeoutSec 30 -ErrorAction Stop
+            $downloaded = $true
+            break
+        } catch {
+            $downloadError = $_.Exception.Message
+        }
+    }
+    if (-not $downloaded) {
         [System.Windows.Forms.MessageBox]::Show(
-                "下载失败：`n`n$($_.Exception.Message)",
+                "下载失败：`n`n$downloadError",
                 "错误",
                 "OK",
                 "Error"
