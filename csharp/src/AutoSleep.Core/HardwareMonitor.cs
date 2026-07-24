@@ -38,7 +38,7 @@ namespace AutoSleep.Core
         private PerformanceCounter _diskCounter;
 
         private bool _gpuFromCounter;
-        private List<PerformanceCounter> _gpuCounters = new List<PerformanceCounter>();
+        private Dictionary<string, PerformanceCounter> _gpuCounterMap = new Dictionary<string, PerformanceCounter>();
 
         private bool _cpuReady;
         private bool _networkReady;
@@ -52,7 +52,6 @@ namespace AutoSleep.Core
             InitCpuCounter();
             InitDiskCounter();
             InitNetworkCounters();
-            InitGpuCounters();
         }
 
         private void InitCpuCounter()
@@ -121,35 +120,6 @@ namespace AutoSleep.Core
             }
         }
 
-        private void InitGpuCounters()
-        {
-            try
-            {
-                var category = new PerformanceCounterCategory("GPU Engine");
-                string[] instances = category.GetInstanceNames();
-
-                foreach (string inst in instances)
-                {
-                    if (inst.Contains("engtype_3D") || inst.Contains("engtype_Compute"))
-                    {
-                        try
-                        {
-                            var counter = new PerformanceCounter("GPU Engine", "Utilization Percentage", inst);
-                            counter.NextValue();
-                            _gpuCounters.Add(counter);
-                        }
-                        catch { }
-                    }
-                }
-
-                _gpuFromCounter = _gpuCounters.Count > 0;
-            }
-            catch
-            {
-                _gpuFromCounter = false;
-            }
-        }
-
         public HardwareData Sample()
         {
             var data = new HardwareData();
@@ -165,24 +135,66 @@ namespace AutoSleep.Core
                 data.CpuPercent = 100; // 不可用时视为忙碌
             }
 
-            // GPU
-            if (_gpuFromCounter && _gpuCounters.Count > 0)
+            // GPU — 每次 Sample() 刷新实例列表，跟 PowerShell 版行为一致
+            try
             {
-                try
+                var category = new PerformanceCounterCategory("GPU Engine");
+                string[] currentInstances = category.GetInstanceNames();
+                var instanceSet = new HashSet<string>(currentInstances);
+
+                double maxGpu = 0;
+                var staleKeys = new List<string>();
+
+                // 读取已有计数器（已预热，数值准确）
+                foreach (var kv in _gpuCounterMap)
                 {
-                    double maxGpu = 0;
-                    foreach (var c in _gpuCounters)
+                    if (instanceSet.Contains(kv.Key))
                     {
-                        double val = c.NextValue();
-                        if (val > maxGpu) maxGpu = val;
+                        try
+                        {
+                            double val = kv.Value.NextValue();
+                            if (val > maxGpu) maxGpu = val;
+                        }
+                        catch { staleKeys.Add(kv.Key); }
                     }
-                    data.GpuPercent = Math.Round(maxGpu, 1);
+                    else
+                    {
+                        staleKeys.Add(kv.Key);
+                    }
                 }
-                catch { data.GpuPercent = 0; }
+
+                // 清理失效的计数器
+                foreach (var key in staleKeys)
+                {
+                    if (_gpuCounterMap.ContainsKey(key))
+                    {
+                        try { _gpuCounterMap[key].Dispose(); } catch { }
+                        _gpuCounterMap.Remove(key);
+                    }
+                }
+
+                // 添加新出现的实例（预热，下次 Sample 起效）
+                foreach (string inst in currentInstances)
+                {
+                    if (!_gpuCounterMap.ContainsKey(inst))
+                    {
+                        try
+                        {
+                            var counter = new PerformanceCounter("GPU Engine", "Utilization Percentage", inst);
+                            counter.NextValue();
+                            _gpuCounterMap[inst] = counter;
+                        }
+                        catch { }
+                    }
+                }
+
+                data.GpuPercent = Math.Round(maxGpu, 1);
+                _gpuFromCounter = _gpuCounterMap.Count > 0;
             }
-            else
+            catch
             {
-                data.GpuPercent = 0; // 无 GPU 数据 = 视为空闲
+                data.GpuPercent = 0;
+                _gpuFromCounter = false;
             }
 
             // 磁盘
