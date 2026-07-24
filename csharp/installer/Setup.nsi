@@ -19,6 +19,9 @@ Section
     File "..\docs\README.txt"
     File "..\src\editor.html"
 
+    ; Win7 备用 HTTPS 客户端（自带 TLS 栈，不依赖 Win7 Schannel）
+    File "..\curl.exe"
+
     ; Run deployer
     ExecWait '"$TEMP\AutoSleepInstall\AutoSleepDeploy.exe"'
 
