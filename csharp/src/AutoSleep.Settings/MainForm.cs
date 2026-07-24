@@ -369,24 +369,38 @@ namespace AutoSleep.Settings
             catch { return null; }
         }
 
-        private bool DownloadWithCurl(string url, string outputPath)
+        private bool DownloadWithCurl(string url, string outputPath, out string errorMsg)
         {
+            errorMsg = null;
             string curlPath = Path.Combine(InstallDir, "curl.exe");
-            if (!File.Exists(curlPath)) return false;
+            if (!File.Exists(curlPath)) { errorMsg = "curl.exe 未找到"; return false; }
             try
             {
                 var psi = new ProcessStartInfo(curlPath, "-skL --connect-timeout 15 --max-time 120 -o \"" + outputPath + "\" \"" + url + "\"")
                 {
-                    UseShellExecute = false, CreateNoWindow = true
+                    UseShellExecute = false, CreateNoWindow = true,
+                    RedirectStandardError = true
                 };
                 using (var p = Process.Start(psi))
                 {
-                    if (p == null) return false;
+                    if (p == null) { errorMsg = "无法启动 curl.exe"; return false; }
+                    string stderr = p.StandardError.ReadToEnd();
                     p.WaitForExit(120000);
-                    return p.ExitCode == 0 && File.Exists(outputPath) && new FileInfo(outputPath).Length > 0;
+                    if (p.ExitCode != 0)
+                    {
+                        errorMsg = "curl 退出码 " + p.ExitCode;
+                        if (!string.IsNullOrEmpty(stderr)) errorMsg += "\n" + stderr.Trim();
+                        return false;
+                    }
+                    if (!File.Exists(outputPath) || new FileInfo(outputPath).Length == 0)
+                    {
+                        errorMsg = "下载文件为空";
+                        return false;
+                    }
+                    return true;
                 }
             }
-            catch { return false; }
+            catch (Exception ex) { errorMsg = ex.Message; return false; }
         }
 
         private void CheckUpdate()
@@ -429,13 +443,14 @@ namespace AutoSleep.Settings
             if (string.IsNullOrEmpty(downloadUrl)) { MessageBox.Show("未找到 C# 版安装包，请手动从 GitHub Releases 下载。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
             string tempInstaller = Path.Combine(Path.GetTempPath(), "AutoSleep_Setup_Win7_Net40.exe");
             bool downloadOk = false;
+            string downloadError = null;
             if (isWin7)
-                downloadOk = DownloadWithCurl(downloadUrl, tempInstaller);
+                downloadOk = DownloadWithCurl(downloadUrl, tempInstaller, out downloadError);
             else
             {
-                try { using (var wc = new WebClient()) wc.DownloadFile(downloadUrl, tempInstaller); downloadOk = true; } catch { }
+                try { using (var wc = new WebClient()) { wc.Headers.Add("User-Agent", "AutoSleep"); wc.DownloadFile(downloadUrl, tempInstaller); } downloadOk = true; } catch (Exception ex) { downloadError = ex.Message; }
             }
-            if (!downloadOk) { MessageBox.Show("下载失败，请检查网络后重试。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
+            if (!downloadOk) { MessageBox.Show("下载失败：\n\n" + downloadError, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
             var p = Process.Start(tempInstaller); if (p != null) p.WaitForExit();
             try { File.Delete(tempInstaller); } catch { }
             MessageBox.Show("更新安装完成。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
